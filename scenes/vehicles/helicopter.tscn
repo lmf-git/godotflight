@@ -1,0 +1,236 @@
+[gd_scene load_steps=17 format=3]
+
+[ext_resource type="Script" path="res://scenes/vehicles/helicopter.gd" id="1_script"]
+[ext_resource type="Script" path="res://scenes/debug/flight_debug.gd" id="2_debug"]
+[ext_resource type="Script" path="res://scenes/vehicles/engine_audio.gd" id="3_audio"]
+[ext_resource type="Script" path="res://scenes/vehicles/cockpit.gd" id="4_cockpit"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(2, 2, 6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_body"]
+size = Vector3(2, 2, 6)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+albedo_color = Color(0.2, 0.3, 0.2, 1)
+metallic = 0.3
+roughness = 0.7
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_tailboom"]
+top_radius = 0.3
+bottom_radius = 0.4
+height = 5
+
+[sub_resource type="BoxMesh" id="BoxMesh_rotor"]
+size = Vector3(10, 0.1, 0.4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rotor"]
+albedo_color = Color(0.3, 0.3, 0.35, 1)
+metallic = 0.5
+
+[sub_resource type="BoxMesh" id="BoxMesh_tail_rotor"]
+size = Vector3(0.1, 2, 0.2)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_skid"]
+top_radius = 0.08
+bottom_radius = 0.08
+height = 4
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_skid"]
+albedo_color = Color(0.15, 0.15, 0.15, 1)
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_skid"]
+radius = 0.1
+height = 4.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_heli_dashboard"]
+size = Vector3(1.6, 0.4, 0.15)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_heli_dashboard"]
+albedo_color = Color(0.1, 0.1, 0.1, 1)
+roughness = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_heli_coaming"]
+size = Vector3(1.6, 0.08, 0.12)
+
+[node name="Helicopter" type="RigidBody3D"]
+collision_layer = 4
+collision_mask = 5
+mass = 4000.0
+script = ExtResource("1_script")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+shape = SubResource("BoxShape3D_body")
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
+mesh = SubResource("BoxMesh_body")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="TailBoom" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 1.2, 5)
+mesh = SubResource("CylinderMesh_tailboom")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="MainRotor" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, 0)
+
+[node name="Blade1" type="MeshInstance3D" parent="MainRotor"]
+mesh = SubResource("BoxMesh_rotor")
+surface_material_override/0 = SubResource("StandardMaterial3D_rotor")
+
+[node name="Blade2" type="MeshInstance3D" parent="MainRotor"]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 0, 0, 0)
+mesh = SubResource("BoxMesh_rotor")
+surface_material_override/0 = SubResource("StandardMaterial3D_rotor")
+
+[node name="TailRotor" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.5, 7.3)
+
+[node name="Blade" type="MeshInstance3D" parent="TailRotor"]
+mesh = SubResource("BoxMesh_tail_rotor")
+surface_material_override/0 = SubResource("StandardMaterial3D_rotor")
+
+[node name="SkidLeft" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, -0.8, -0.3, 0)
+mesh = SubResource("CylinderMesh_skid")
+surface_material_override/0 = SubResource("StandardMaterial3D_skid")
+
+[node name="SkidRight" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0.8, -0.3, 0)
+mesh = SubResource("CylinderMesh_skid")
+surface_material_override/0 = SubResource("StandardMaterial3D_skid")
+
+[node name="SkidLeftCollider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, -0.8, -0.3, 0)
+shape = SubResource("CapsuleShape3D_skid")
+
+[node name="SkidRightCollider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0.8, -0.3, 0)
+shape = SubResource("CapsuleShape3D_skid")
+
+[node name="Cockpit" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.0, -2)
+script = ExtResource("4_cockpit")
+
+[node name="Dashboard" type="MeshInstance3D" parent="Cockpit"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, -0.85)
+mesh = SubResource("BoxMesh_heli_dashboard")
+surface_material_override/0 = SubResource("StandardMaterial3D_heli_dashboard")
+
+[node name="DashCoaming" type="MeshInstance3D" parent="Cockpit"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.82)
+mesh = SubResource("BoxMesh_heli_coaming")
+surface_material_override/0 = SubResource("StandardMaterial3D_heli_dashboard")
+
+[node name="LeftPanel" type="MeshInstance3D" parent="Cockpit"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.85, 0.1, -0.4)
+mesh = SubResource("BoxMesh_heli_dashboard")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="RightPanel" type="MeshInstance3D" parent="Cockpit"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.85, 0.1, -0.4)
+mesh = SubResource("BoxMesh_heli_dashboard")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="Instruments" type="Node3D" parent="Cockpit"]
+
+[node name="AirspeedLabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.35, 0.1, -0.72)
+pixel_size = 0.002
+font_size = 14
+outline_size = 4
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = "  0 KTS"
+
+[node name="AltimeterLabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.35, 0.1, -0.72)
+pixel_size = 0.002
+font_size = 14
+outline_size = 4
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = "    0 FT"
+
+[node name="HeadingLabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, -0.72)
+pixel_size = 0.002
+font_size = 14
+outline_size = 4
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = "HDG 000"
+
+[node name="VSILabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.35, -0.03, -0.72)
+pixel_size = 0.002
+font_size = 12
+outline_size = 3
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = "VS +0"
+
+[node name="AoALabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.1, -0.03, -0.72)
+pixel_size = 0.002
+font_size = 12
+outline_size = 3
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = "AOA +0.0"
+
+[node name="ThrottleLabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.15, -0.03, -0.72)
+pixel_size = 0.002
+font_size = 12
+outline_size = 3
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = "COL   0%"
+
+[node name="GearLabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.38, -0.03, -0.72)
+pixel_size = 0.002
+font_size = 12
+outline_size = 3
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = ""
+
+[node name="FlapsLabel" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.1, -0.13, -0.72)
+pixel_size = 0.002
+font_size = 12
+outline_size = 3
+modulate = Color(0.3, 1, 0.3, 1)
+outline_modulate = Color(0, 0.1, 0, 1)
+text = ""
+
+[node name="StallWarning" type="Label3D" parent="Cockpit/Instruments"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.2, -0.13, -0.72)
+pixel_size = 0.003
+font_size = 18
+outline_size = 6
+modulate = Color(1, 0.1, 0.1, 1)
+outline_modulate = Color(0.3, 0, 0, 1)
+text = "STALL"
+visible = false
+
+[node name="CockpitCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -2)
+fov = 80.0
+
+[node name="ThirdPersonCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 10, 20)
+fov = 70.0
+
+[node name="ExitPosition" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0, 0)
+
+[node name="EngineAudio" type="AudioStreamPlayer3D" parent="."]
+script = ExtResource("3_audio")
+
+[node name="DebugDraw" type="Node3D" parent="."]
+script = ExtResource("2_debug")

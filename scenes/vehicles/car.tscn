@@ -1,0 +1,140 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scenes/vehicles/car.gd" id="1_script"]
+[ext_resource type="Script" path="res://scenes/debug/flight_debug.gd" id="2_debug"]
+[ext_resource type="Script" path="res://scenes/vehicles/engine_audio.gd" id="3_audio"]
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_car"]
+friction = 1.2
+bounce = 0.05
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(1.6, 0.5, 3.5)
+
+[sub_resource type="BoxMesh" id="BoxMesh_body"]
+size = Vector3(1.8, 0.5, 4)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+albedo_color = Color(0.7, 0.1, 0.1, 1)
+metallic = 0.5
+roughness = 0.4
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_wheel"]
+top_radius = 0.3
+bottom_radius = 0.3
+height = 0.2
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wheel"]
+albedo_color = Color(0.15, 0.15, 0.15, 1)
+roughness = 0.9
+
+[sub_resource type="BoxMesh" id="BoxMesh_cabin"]
+size = Vector3(1.6, 0.5, 1.8)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_glass"]
+albedo_color = Color(0.3, 0.35, 0.4, 0.8)
+metallic = 0.8
+roughness = 0.1
+
+[node name="Car" type="RigidBody3D"]
+collision_layer = 4
+collision_mask = 5
+mass = 1200.0
+physics_material_override = SubResource("PhysicsMaterial_car")
+continuous_cd = true
+script = ExtResource("1_script")
+
+[node name="BodyCollision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.7, 0)
+shape = SubResource("BoxShape3D_body")
+
+[node name="SuspensionRayFL" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.9, 0.55, -1.3)
+target_position = Vector3(0, -0.55, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayFR" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 0.55, -1.3)
+target_position = Vector3(0, -0.55, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayRL" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.9, 0.55, 1.3)
+target_position = Vector3(0, -0.55, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayRR" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 0.55, 1.3)
+target_position = Vector3(0, -0.55, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="Body" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+mesh = SubResource("BoxMesh_body")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="Cabin" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, -0.2)
+mesh = SubResource("BoxMesh_cabin")
+surface_material_override/0 = SubResource("StandardMaterial3D_glass")
+
+[node name="WheelFL" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.9, 0.3, -1.3)
+
+[node name="Roll" type="Node3D" parent="WheelFL"]
+
+[node name="Mesh" type="MeshInstance3D" parent="WheelFL/Roll"]
+transform = Transform3D(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_wheel")
+surface_material_override/0 = SubResource("StandardMaterial3D_wheel")
+
+[node name="WheelFR" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 0.3, -1.3)
+
+[node name="Roll" type="Node3D" parent="WheelFR"]
+
+[node name="Mesh" type="MeshInstance3D" parent="WheelFR/Roll"]
+transform = Transform3D(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_wheel")
+surface_material_override/0 = SubResource("StandardMaterial3D_wheel")
+
+[node name="WheelRL" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.9, 0.3, 1.3)
+
+[node name="Roll" type="Node3D" parent="WheelRL"]
+
+[node name="Mesh" type="MeshInstance3D" parent="WheelRL/Roll"]
+transform = Transform3D(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_wheel")
+surface_material_override/0 = SubResource("StandardMaterial3D_wheel")
+
+[node name="WheelRR" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.9, 0.3, 1.3)
+
+[node name="Roll" type="Node3D" parent="WheelRR"]
+
+[node name="Mesh" type="MeshInstance3D" parent="WheelRR/Roll"]
+transform = Transform3D(0, 1, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0)
+mesh = SubResource("CylinderMesh_wheel")
+surface_material_override/0 = SubResource("StandardMaterial3D_wheel")
+
+[node name="CockpitCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0.2)
+fov = 75.0
+
+[node name="ThirdPersonCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 12)
+fov = 70.0
+
+[node name="ExitPosition" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 0, 0)
+
+[node name="EngineAudio" type="AudioStreamPlayer3D" parent="."]
+script = ExtResource("3_audio")
+
+[node name="DebugDraw" type="Node3D" parent="."]
+script = ExtResource("2_debug")

@@ -1,0 +1,240 @@
+[gd_scene format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="1_player"]
+[ext_resource type="PackedScene" path="res://scenes/vehicles/helicopter.tscn" id="2_heli"]
+[ext_resource type="PackedScene" path="res://scenes/vehicles/fixed_wing.tscn" id="3_plane"]
+[ext_resource type="PackedScene" path="res://scenes/vehicles/car.tscn" id="4_car"]
+[ext_resource type="PackedScene" path="res://scenes/vehicles/jet.tscn" id="5_jet"]
+[ext_resource type="Script" path="res://scenes/terrain_generator.gd" id="6_terrain"]
+[ext_resource type="Script" path="res://scenes/map_overlay.gd" id="7_map"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.35, 0.55, 0.85, 1)
+sky_horizon_color = Color(0.65, 0.75, 0.85, 1)
+ground_bottom_color = Color(0.15, 0.12, 0.1, 1)
+ground_horizon_color = Color(0.35, 0.35, 0.3, 1)
+
+[sub_resource type="Sky" id="Sky_main"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_main"]
+background_mode = 2
+sky = SubResource("Sky_main")
+ambient_light_source = 2
+ambient_light_color = Color(0.6, 0.65, 0.7, 1)
+ambient_light_energy = 0.5
+tonemap_mode = 2
+ssao_enabled = true
+glow_enabled = true
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_ground"]
+friction = 1.5
+bounce = 0.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_ground"]
+size = Vector3(100000, 1, 100000)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ground"]
+albedo_color = Color(0.3, 0.45, 0.2, 1)
+roughness = 0.9
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_ground"]
+size = Vector3(100000, 1, 100000)
+
+[sub_resource type="BoxMesh" id="BoxMesh_runway"]
+size = Vector3(30, 0.1, 1500)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_runway"]
+albedo_color = Color(0.2, 0.2, 0.2, 1)
+roughness = 0.8
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_runway"]
+size = Vector3(30, 0.1, 1500)
+
+[sub_resource type="BoxMesh" id="BoxMesh_centerstripe"]
+size = Vector3(0.5, 0.02, 30)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stripe"]
+albedo_color = Color(0.9, 0.9, 0.9, 1)
+roughness = 0.7
+
+[sub_resource type="BoxMesh" id="BoxMesh_threshold"]
+size = Vector3(1.5, 0.02, 20)
+
+[node name="Main" type="Node3D" unique_id=1725444954]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1240781132]
+environment = SubResource("Environment_main")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="." unique_id=507192840]
+transform = Transform3D(0.86601907, -0.3535631, 0.3535593, 0, 0.70710295, 0.7071106, -0.500011, -0.61237127, 0.61236465, 0, 50, 0)
+light_color = Color(1, 0.95, 0.85, 1)
+light_energy = 1.2
+shadow_enabled = true
+
+[node name="Ground" type="StaticBody3D" parent="." unique_id=1992195261]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+physics_material_override = SubResource("PhysicsMaterial_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Ground" unique_id=1070080138]
+mesh = SubResource("BoxMesh_ground")
+surface_material_override/0 = SubResource("StandardMaterial3D_ground")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Ground" unique_id=389240686]
+shape = SubResource("BoxShape3D_ground")
+
+[node name="ProceduralTerrain" type="Node3D" parent="."]
+script = ExtResource("6_terrain")
+
+[node name="Runway" type="StaticBody3D" parent="." unique_id=932854398]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+physics_material_override = SubResource("PhysicsMaterial_ground")
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Runway" unique_id=61507153]
+mesh = SubResource("BoxMesh_runway")
+surface_material_override/0 = SubResource("StandardMaterial3D_runway")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Runway" unique_id=1944909274]
+shape = SubResource("BoxShape3D_runway")
+
+[node name="Stripes" type="Node3D" parent="Runway" unique_id=1205983503]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.06, 0)
+
+[node name="Center1" type="MeshInstance3D" parent="Runway/Stripes" unique_id=755726525]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -680)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center2" type="MeshInstance3D" parent="Runway/Stripes" unique_id=1773885971]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -600)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center3" type="MeshInstance3D" parent="Runway/Stripes" unique_id=1323266019]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -520)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center4" type="MeshInstance3D" parent="Runway/Stripes" unique_id=931155780]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -440)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center5" type="MeshInstance3D" parent="Runway/Stripes" unique_id=439981847]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -360)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center6" type="MeshInstance3D" parent="Runway/Stripes" unique_id=1818578126]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -280)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center7" type="MeshInstance3D" parent="Runway/Stripes" unique_id=170625436]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -200)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center8" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -120)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center9" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -40)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center10" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 40)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center11" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 120)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center12" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 200)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center13" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 280)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center14" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 360)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center15" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 440)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center16" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 520)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center17" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 600)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Center18" type="MeshInstance3D" parent="Runway/Stripes"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 680)
+mesh = SubResource("BoxMesh_centerstripe")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="ThresholdL1" type="MeshInstance3D" parent="Runway/Stripes" unique_id=1289432784]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 0, -730)
+mesh = SubResource("BoxMesh_threshold")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="ThresholdL2" type="MeshInstance3D" parent="Runway/Stripes" unique_id=980374316]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -7, 0, -730)
+mesh = SubResource("BoxMesh_threshold")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="ThresholdL3" type="MeshInstance3D" parent="Runway/Stripes" unique_id=2113672344]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4, 0, -730)
+mesh = SubResource("BoxMesh_threshold")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="ThresholdR1" type="MeshInstance3D" parent="Runway/Stripes" unique_id=2135313301]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 10, 0, -730)
+mesh = SubResource("BoxMesh_threshold")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="ThresholdR2" type="MeshInstance3D" parent="Runway/Stripes" unique_id=896697298]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0, -730)
+mesh = SubResource("BoxMesh_threshold")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="ThresholdR3" type="MeshInstance3D" parent="Runway/Stripes" unique_id=77372890]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, -730)
+mesh = SubResource("BoxMesh_threshold")
+surface_material_override/0 = SubResource("StandardMaterial3D_stripe")
+
+[node name="Player" parent="." unique_id=935445084 instance=ExtResource("1_player")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 1, 690)
+
+[node name="Helicopter" parent="." unique_id=413227944 instance=ExtResource("2_heli")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -20, 2, 0)
+
+[node name="FixedWing" parent="." unique_id=348917052 instance=ExtResource("3_plane")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 700)
+
+[node name="Car" parent="." unique_id=691514394 instance=ExtResource("4_car")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 30, 0.5, -20)
+
+[node name="Jet" parent="." instance=ExtResource("5_jet")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -10, 3, 680)
+
+[node name="MapOverlay" type="CanvasLayer" parent="."]
+layer = 10
+script = ExtResource("7_map")

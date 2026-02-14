@@ -1,0 +1,139 @@
+[gd_scene load_steps=15 format=3]
+
+[ext_resource type="Script" path="res://scenes/vehicles/missile.gd" id="1_script"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_missile"]
+radius = 0.08
+height = 1.5
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_missile_body"]
+albedo_color = Color(0.4, 0.42, 0.4, 1)
+metallic = 0.6
+roughness = 0.3
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_missile"]
+top_radius = 0.06
+bottom_radius = 0.08
+height = 1.5
+radial_segments = 8
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_nosecone"]
+top_radius = 0.0
+bottom_radius = 0.08
+height = 0.3
+radial_segments = 8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_nosecone"]
+albedo_color = Color(0.3, 0.3, 0.3, 1)
+metallic = 0.5
+roughness = 0.4
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_flame"]
+top_radius = 0.0
+bottom_radius = 0.06
+height = 0.4
+radial_segments = 6
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_flame"]
+transparency = 1
+albedo_color = Color(1, 0.8, 0.3, 0.9)
+emission_enabled = true
+emission = Color(1, 0.6, 0.1, 1)
+emission_energy_multiplier = 4.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_fire_particle"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(1, 0.6, 0.15, 0.8)
+emission_enabled = true
+emission = Color(1, 0.5, 0.1, 1)
+emission_energy_multiplier = 3.0
+billboard_mode = 3
+
+[sub_resource type="QuadMesh" id="QuadMesh_particle"]
+size = Vector2(0.12, 0.12)
+material = SubResource("StandardMaterial3D_fire_particle")
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_exhaust"]
+lifetime_randomness = 0.3
+emission_shape = 1
+emission_sphere_radius = 0.02
+direction = Vector3(0, 0, 1)
+spread = 12.0
+initial_velocity_min = 8.0
+initial_velocity_max = 15.0
+gravity = Vector3(0, 0, 0)
+scale_min = 0.8
+scale_max = 2.5
+color = Color(1, 0.7, 0.2, 1)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_smoke_particle"]
+transparency = 1
+shading_mode = 0
+albedo_color = Color(0.8, 0.8, 0.8, 0.35)
+billboard_mode = 3
+
+[sub_resource type="QuadMesh" id="QuadMesh_smoke_particle"]
+size = Vector2(0.25, 0.25)
+material = SubResource("StandardMaterial3D_smoke_particle")
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_smoke"]
+lifetime_randomness = 0.4
+emission_shape = 1
+emission_sphere_radius = 0.03
+direction = Vector3(0, 0, 1)
+spread = 15.0
+initial_velocity_min = 2.0
+initial_velocity_max = 5.0
+gravity = Vector3(0, 1, 0)
+scale_min = 0.5
+scale_max = 4.0
+color = Color(0.7, 0.7, 0.7, 0.5)
+
+[node name="Missile" type="RigidBody3D"]
+collision_layer = 8
+collision_mask = 5
+mass = 80.0
+gravity_scale = 1.0
+continuous_cd = true
+script = ExtResource("1_script")
+
+[node name="MissileBody" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0)
+mesh = SubResource("CylinderMesh_missile")
+surface_material_override/0 = SubResource("StandardMaterial3D_missile_body")
+
+[node name="Nosecone" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 0, -0.9)
+mesh = SubResource("CylinderMesh_nosecone")
+surface_material_override/0 = SubResource("StandardMaterial3D_nosecone")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0)
+shape = SubResource("CapsuleShape3D_missile")
+
+[node name="ExhaustFlame" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 0.95)
+visible = false
+mesh = SubResource("CylinderMesh_flame")
+surface_material_override/0 = SubResource("StandardMaterial3D_flame")
+
+[node name="ExhaustParticles" type="GPUParticles3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.75)
+emitting = false
+amount = 48
+lifetime = 0.4
+local_coords = false
+process_material = SubResource("ParticleProcessMaterial_exhaust")
+draw_pass_1 = SubResource("QuadMesh_particle")
+visibility_aabb = AABB(-2, -2, -2, 4, 4, 12)
+
+[node name="SmokeTrail" type="GPUParticles3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.75)
+emitting = false
+amount = 80
+lifetime = 3.0
+local_coords = false
+process_material = SubResource("ParticleProcessMaterial_smoke")
+draw_pass_1 = SubResource("QuadMesh_smoke_particle")
+visibility_aabb = AABB(-5, -5, -5, 10, 10, 60)
