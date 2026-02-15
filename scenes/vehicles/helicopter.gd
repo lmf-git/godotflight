@@ -72,6 +72,10 @@ var damage_index := 0
 @onready var tail_rotor: Node3D = $TailRotor
 @onready var tail_boom: Node3D = $TailBoom
 @onready var debug_draw: Node3D = $DebugDraw
+@onready var tail_boom_collider: CollisionShape3D = $TailBoomCollider
+@onready var blade1_collider: CollisionShape3D = $MainRotor/Blade1Collider
+@onready var blade2_collider: CollisionShape3D = $MainRotor/Blade2Collider
+@onready var tail_rotor_collider: CollisionShape3D = $TailRotorCollider
 
 func _ready() -> void:
 	super._ready()
@@ -319,7 +323,10 @@ func _destroy_tail_rotor() -> void:
 		return
 	has_tail_rotor = false
 	if tail_rotor:
-		tail_rotor.visible = false
+		spawn_debris(tail_rotor, 30.0)
+		tail_rotor = null
+	if tail_rotor_collider:
+		tail_rotor_collider.set_deferred("disabled", true)
 	print("Tail rotor destroyed! Losing yaw control!")
 
 func _destroy_main_rotor() -> void:
@@ -327,7 +334,10 @@ func _destroy_main_rotor() -> void:
 		return
 	has_main_rotor = false
 	if main_rotor:
-		main_rotor.visible = false
+		spawn_debris(main_rotor, 80.0)
+		main_rotor = null
+		blade1_collider = null
+		blade2_collider = null
 	print("Main rotor destroyed! No lift!")
 
 func _destroy_tail_boom() -> void:
@@ -335,10 +345,20 @@ func _destroy_tail_boom() -> void:
 		return
 	has_tail_boom = false
 	has_tail_rotor = false  # Tail rotor goes with the boom
+	# If tail rotor still attached, reparent it under tail boom so they fly off together
+	if tail_rotor and tail_boom:
+		var tr_world := tail_rotor.global_transform
+		tail_rotor.get_parent().remove_child(tail_rotor)
+		tail_boom.add_child(tail_rotor)
+		tail_rotor.global_transform = tr_world
 	if tail_boom:
-		tail_boom.visible = false
-	if tail_rotor:
-		tail_rotor.visible = false
+		spawn_debris(tail_boom, 150.0)
+		tail_boom = null
+		tail_rotor = null
+	if tail_boom_collider:
+		tail_boom_collider.set_deferred("disabled", true)
+	if tail_rotor_collider:
+		tail_rotor_collider.set_deferred("disabled", true)
 	print("Tail boom destroyed!")
 
 func _on_body_entered(body: Node) -> void:

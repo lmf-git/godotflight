@@ -13,6 +13,8 @@ var _phase2: float = 0.0       # secondary oscillator
 var _phase3: float = 0.0       # tertiary oscillator
 var _vehicle: Vehicle
 var _smoothed_power: float = 0.0
+var _lpf_prev: float = 0.0     # one-pole low-pass filter state
+var _noise_lpf: float = 0.0    # filtered noise state
 
 
 func _ready() -> void:
@@ -75,27 +77,32 @@ func _get_power() -> float:
 	return 0.0
 
 
-# --- Propeller: sawtooth with harmonics for buzzy prop drone ---
+# --- Propeller: sine harmonics for smooth buzzy prop drone ---
 
 func _fill_propeller(frames: int) -> void:
 	var freq := lerpf(30.0, 85.0, _smoothed_power)
 	var vol := lerpf(0.08, 0.45, _smoothed_power)
 	var step := freq / MIX_RATE
-	var step2 := freq * 2.0 / MIX_RATE  # 1st harmonic
+	var step2 := freq * 2.0 / MIX_RATE
+	var step3 := freq * 3.0 / MIX_RATE
+	# Low-pass cutoff scales with frequency (higher freq = more open)
+	var lpf_alpha := clampf(freq * 4.0 / MIX_RATE, 0.05, 0.6)
 
 	for i in range(frames):
-		# Sawtooth fundamental
-		var saw := _phase * 2.0 - 1.0
-		# Softer octave harmonic
-		var harm := _phase2 * 2.0 - 1.0
-		var sample := (saw * 0.7 + harm * 0.15) * vol
-
-		_playback.push_frame(Vector2(sample, sample))
+		# Smooth sine harmonics instead of raw sawtooth
+		var f1 := sin(_phase * TAU)
+		var f2 := sin(_phase2 * TAU) * 0.5
+		var f3 := sin(_phase3 * TAU) * 0.25
+		var sample := (f1 + f2 + f3) * vol * 0.57
+		# One-pole low-pass to soften further
+		_lpf_prev += (sample - _lpf_prev) * lpf_alpha
+		_playback.push_frame(Vector2(_lpf_prev, _lpf_prev))
 		_phase = fmod(_phase + step, 1.0)
 		_phase2 = fmod(_phase2 + step2, 1.0)
+		_phase3 = fmod(_phase3 + step3, 1.0)
 
 
-# --- Helicopter rotor: pulse wave at blade-pass frequency ---
+# --- Helicopter rotor: smooth blade-pass bumps + turbine whine ---
 
 func _fill_rotor(frames: int) -> void:
 	var heli: Helicopter = _vehicle as Helicopter
@@ -105,27 +112,33 @@ func _fill_rotor(frames: int) -> void:
 	var freq := clampf(bpf, 5.0, 120.0)
 	var vol := lerpf(0.0, 0.5, _smoothed_power)
 	var step := freq / MIX_RATE
-	# Pulse width narrows at higher speed for sharper thwop
+	# Pulse width narrows at higher speed for tighter thwop
 	var pulse_w := lerpf(0.5, 0.25, _smoothed_power)
 
 	# Low rumble from turbine
 	var turbine_freq := lerpf(80.0, 220.0, _smoothed_power)
 	var turbine_step := turbine_freq / MIX_RATE
 	var turbine_vol := lerpf(0.02, 0.15, _smoothed_power)
+	var lpf_alpha := 0.15
 
 	for i in range(frames):
-		# Pulse wave for blade thwop
-		var pulse := 1.0 if _phase < pulse_w else -1.0
+		# Smooth raised-cosine bump instead of hard pulse
+		var blade: float
+		if _phase < pulse_w:
+			blade = 0.5 + 0.5 * cos(_phase / pulse_w * TAU - PI)
+		else:
+			blade = 0.0
 		# Add turbine whine underneath
 		var turbine := sin(_phase2 * TAU) * turbine_vol
-		var sample := pulse * vol * 0.6 + turbine
-
-		_playback.push_frame(Vector2(sample, sample))
+		var sample := (blade * 2.0 - 0.5) * vol * 0.6 + turbine
+		# Low-pass smooth
+		_lpf_prev += (sample - _lpf_prev) * lpf_alpha
+		_playback.push_frame(Vector2(_lpf_prev, _lpf_prev))
 		_phase = fmod(_phase + step, 1.0)
 		_phase2 = fmod(_phase2 + turbine_step, 1.0)
 
 
-# --- Jet turbine: sine whine + filtered noise ---
+# --- Jet turbine: sine whine + smoothed noise ---
 
 func _fill_turbine(frames: int) -> void:
 	var jet: Jet = _vehicle as Jet
@@ -134,7 +147,7 @@ func _fill_turbine(frames: int) -> void:
 	var vol := lerpf(0.06, 0.35, _smoothed_power)
 	var step := freq / MIX_RATE
 
-	# Second harmonic
+	# Second harmonic (5th interval for richer tone)
 	var step2 := freq * 1.5 / MIX_RATE
 	var harm_vol := vol * 0.3
 
@@ -144,14 +157,20 @@ func _fill_turbine(frames: int) -> void:
 		noise_vol *= 2.5
 		vol *= 1.3
 
+	# Noise filter coefficient - lower = smoother/darker noise
+	var noise_alpha := 0.12
+	var lpf_alpha := 0.3
+
 	for i in range(frames):
 		var tone := sin(_phase * TAU) * vol
 		var harm := sin(_phase2 * TAU) * harm_vol
-		# Cheap filtered noise: smooth random
-		var noise := (randf() * 2.0 - 1.0) * noise_vol
-		var sample := tone + harm + noise
-
-		_playback.push_frame(Vector2(sample, sample))
+		# Low-pass filtered noise (smooth random into itself)
+		var raw_noise := (randf() * 2.0 - 1.0) * noise_vol
+		_noise_lpf += (raw_noise - _noise_lpf) * noise_alpha
+		var sample := tone + harm + _noise_lpf
+		# Final low-pass
+		_lpf_prev += (sample - _lpf_prev) * lpf_alpha
+		_playback.push_frame(Vector2(_lpf_prev, _lpf_prev))
 		_phase = fmod(_phase + step, 1.0)
 		_phase2 = fmod(_phase2 + step2, 1.0)
 
@@ -170,14 +189,16 @@ func _fill_car_engine(frames: int) -> void:
 	var step := freq / MIX_RATE
 	var step2 := freq * 2.0 / MIX_RATE  # 2nd harmonic
 	var step3 := freq * 3.0 / MIX_RATE  # 3rd harmonic
+	var lpf_alpha := clampf(freq * 5.0 / MIX_RATE, 0.08, 0.5)
 
 	for i in range(frames):
 		var f1 := sin(_phase * TAU)
 		var f2 := sin(_phase2 * TAU) * 0.5
 		var f3 := sin(_phase3 * TAU) * 0.25
-		var sample := (f1 + f2 + f3) * vol * 0.57  # normalize
-
-		_playback.push_frame(Vector2(sample, sample))
+		var sample := (f1 + f2 + f3) * vol * 0.57
+		# Low-pass smooth
+		_lpf_prev += (sample - _lpf_prev) * lpf_alpha
+		_playback.push_frame(Vector2(_lpf_prev, _lpf_prev))
 		_phase = fmod(_phase + step, 1.0)
 		_phase2 = fmod(_phase2 + step2, 1.0)
 		_phase3 = fmod(_phase3 + step3, 1.0)

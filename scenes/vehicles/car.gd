@@ -308,7 +308,8 @@ func _destroy_wheel_fl() -> void:
 		return
 	has_wheel_fl = false
 	if wheel_fl:
-		wheel_fl.visible = false
+		spawn_debris(wheel_fl, 15.0)
+		wheel_fl = null
 	if susp_ray_fl:
 		susp_ray_fl.enabled = false
 	print("Front left wheel destroyed!")
@@ -318,7 +319,8 @@ func _destroy_wheel_fr() -> void:
 		return
 	has_wheel_fr = false
 	if wheel_fr:
-		wheel_fr.visible = false
+		spawn_debris(wheel_fr, 15.0)
+		wheel_fr = null
 	if susp_ray_fr:
 		susp_ray_fr.enabled = false
 	print("Front right wheel destroyed!")
@@ -328,7 +330,8 @@ func _destroy_wheel_rl() -> void:
 		return
 	has_wheel_rl = false
 	if wheel_rl:
-		wheel_rl.visible = false
+		spawn_debris(wheel_rl, 15.0)
+		wheel_rl = null
 	if susp_ray_rl:
 		susp_ray_rl.enabled = false
 	print("Rear left wheel destroyed!")
@@ -338,7 +341,8 @@ func _destroy_wheel_rr() -> void:
 		return
 	has_wheel_rr = false
 	if wheel_rr:
-		wheel_rr.visible = false
+		spawn_debris(wheel_rr, 15.0)
+		wheel_rr = null
 	if susp_ray_rr:
 		susp_ray_rr.enabled = false
 	print("Rear right wheel destroyed!")

@@ -708,14 +708,14 @@ func _destroy_left_wing() -> void:
 		return
 	has_left_wing = false
 	if left_wing_mesh:
-		left_wing_mesh.visible = false
+		spawn_debris(left_wing_mesh, 100.0)
+		left_wing_mesh = null
 	if left_wing_collider:
 		left_wing_collider.set_deferred("disabled", true)
-	# Also destroy left landing gear
 	if landing_gear:
 		var left_gear: Node3D = landing_gear.get_node_or_null("LeftGear")
 		if left_gear:
-			left_gear.visible = false
+			spawn_debris(left_gear, 20.0)
 	if left_wheel_col:
 		left_wheel_col.set_deferred("disabled", true)
 	print("Left wing destroyed!")
@@ -725,14 +725,14 @@ func _destroy_right_wing() -> void:
 		return
 	has_right_wing = false
 	if right_wing_mesh:
-		right_wing_mesh.visible = false
+		spawn_debris(right_wing_mesh, 100.0)
+		right_wing_mesh = null
 	if right_wing_collider:
 		right_wing_collider.set_deferred("disabled", true)
-	# Also destroy right landing gear
 	if landing_gear:
 		var right_gear: Node3D = landing_gear.get_node_or_null("RightGear")
 		if right_gear:
-			right_gear.visible = false
+			spawn_debris(right_gear, 20.0)
 	if right_wheel_col:
 		right_wheel_col.set_deferred("disabled", true)
 	print("Right wing destroyed!")
@@ -742,7 +742,8 @@ func _destroy_horizontal_tail() -> void:
 		return
 	has_horizontal_tail = false
 	if horizontal_tail_mesh:
-		horizontal_tail_mesh.visible = false
+		spawn_debris(horizontal_tail_mesh, 40.0)
+		horizontal_tail_mesh = null
 	if htail_collider:
 		htail_collider.set_deferred("disabled", true)
 	print("Horizontal tail destroyed!")
@@ -752,7 +753,8 @@ func _destroy_vertical_tail() -> void:
 		return
 	has_vertical_tail = false
 	if vertical_tail_mesh:
-		vertical_tail_mesh.visible = false
+		spawn_debris(vertical_tail_mesh, 30.0)
+		vertical_tail_mesh = null
 	if vtail_collider:
 		vtail_collider.set_deferred("disabled", true)
 	print("Vertical tail destroyed!")
@@ -777,7 +779,7 @@ func _break_gear(which: String) -> void:
 	else:
 		return
 	if gear_node:
-		gear_node.visible = false
+		spawn_debris(gear_node, 15.0)
 	print("%s gear collapsed!" % which.capitalize())
 
 # === MISSILES ===

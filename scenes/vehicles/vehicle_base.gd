@@ -323,6 +323,84 @@ func calculate_aoa() -> float:
 		return 0.0  # Too slow to have meaningful AoA
 	return rad_to_deg(atan2(vert_speed, maxf(forward_speed, 0.5)))
 
+## Spawn a destroyed part as a free-flying RigidBody3D debris piece.
+## Takes a mesh node (or Node3D with mesh children), detaches it, and flings it.
+func spawn_debris(part_node: Node3D, part_mass: float = 50.0) -> void:
+	if not part_node or not is_instance_valid(part_node):
+		return
+
+	var scene_root := get_tree().current_scene
+	if not scene_root:
+		part_node.visible = false
+		return
+
+	# Capture world transform before reparenting
+	var world_xform := part_node.global_transform
+
+	# Remove from vehicle
+	part_node.get_parent().remove_child(part_node)
+
+	# Create a RigidBody3D wrapper
+	var debris := RigidBody3D.new()
+	debris.mass = part_mass
+	debris.gravity_scale = 1.0
+	debris.collision_layer = 4  # Vehicle layer
+	debris.collision_mask = 1   # World only
+
+	# Add the mesh node as child of debris
+	part_node.transform = Transform3D.IDENTITY
+	debris.add_child(part_node)
+	part_node.visible = true
+
+	# Add a simple collision shape based on the part's AABB
+	var aabb := _get_node_aabb(part_node)
+	if aabb.size.length() > 0.01:
+		var col := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = aabb.size
+		col.shape = box
+		col.position = aabb.get_center()
+		debris.add_child(col)
+
+	# Place in world
+	scene_root.add_child(debris)
+	debris.global_transform = world_xform
+
+	# Give it the vehicle's velocity plus a random fling
+	debris.linear_velocity = linear_velocity + Vector3(
+		randf_range(-5, 5),
+		randf_range(2, 8),
+		randf_range(-5, 5)
+	)
+	debris.angular_velocity = Vector3(
+		randf_range(-3, 3),
+		randf_range(-3, 3),
+		randf_range(-3, 3)
+	)
+
+	# Auto-despawn after 10 seconds
+	var timer := Timer.new()
+	timer.wait_time = 10.0
+	timer.one_shot = true
+	timer.timeout.connect(func(): debris.queue_free())
+	debris.add_child(timer)
+	timer.start()
+
+## Get combined AABB of a node and its mesh children
+func _get_node_aabb(node: Node3D) -> AABB:
+	var result := AABB()
+	if node is MeshInstance3D and node.mesh:
+		result = node.mesh.get_aabb()
+	for child in node.get_children():
+		if child is MeshInstance3D and child.mesh:
+			var child_aabb: AABB = child.mesh.get_aabb()
+			child_aabb.position += child.position
+			if result.size.length() < 0.01:
+				result = child_aabb
+			else:
+				result = result.merge(child_aabb)
+	return result
+
 func _apply_turbulence(delta: float) -> void:
 	if airspeed < 5.0:
 		return

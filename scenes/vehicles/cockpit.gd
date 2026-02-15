@@ -5,8 +5,8 @@ extends Node3D
 
 var vehicle: Vehicle
 
-@onready var joystick: Node3D = $Joystick
-@onready var throttle_lever: Node3D = $ThrottleLever
+@onready var joystick: Node3D = get_node_or_null("Joystick")
+@onready var throttle_lever: Node3D = get_node_or_null("ThrottleLever")
 
 # Instrument labels
 @onready var airspeed_label: Label3D = $Instruments/AirspeedLabel

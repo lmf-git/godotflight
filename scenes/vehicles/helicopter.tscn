@@ -1,4 +1,4 @@
-[gd_scene load_steps=17 format=3]
+[gd_scene load_steps=24 format=3]
 
 [ext_resource type="Script" path="res://scenes/vehicles/helicopter.gd" id="1_script"]
 [ext_resource type="Script" path="res://scenes/debug/flight_debug.gd" id="2_debug"]
@@ -8,8 +8,17 @@
 [sub_resource type="BoxShape3D" id="BoxShape3D_body"]
 size = Vector3(2, 2, 6)
 
-[sub_resource type="BoxMesh" id="BoxMesh_body"]
-size = Vector3(2, 2, 6)
+[sub_resource type="BoxMesh" id="BoxMesh_floor"]
+size = Vector3(2, 0.1, 6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_ceiling"]
+size = Vector3(2, 0.1, 6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_side_wall"]
+size = Vector3(0.1, 2, 6)
+
+[sub_resource type="BoxMesh" id="BoxMesh_rear_wall"]
+size = Vector3(2, 2, 0.1)
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
 albedo_color = Color(0.2, 0.3, 0.2, 1)
@@ -43,6 +52,19 @@ albedo_color = Color(0.15, 0.15, 0.15, 1)
 radius = 0.1
 height = 4.0
 
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_tailboom"]
+radius = 0.4
+height = 5.0
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_main_blade1"]
+size = Vector3(10, 0.1, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_main_blade2"]
+size = Vector3(10, 0.1, 0.4)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_tail_rotor"]
+size = Vector3(0.15, 2.0, 0.25)
+
 [sub_resource type="BoxMesh" id="BoxMesh_heli_dashboard"]
 size = Vector3(1.6, 0.4, 0.15)
 
@@ -63,9 +85,29 @@ script = ExtResource("1_script")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
 shape = SubResource("BoxShape3D_body")
 
-[node name="Body" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0)
-mesh = SubResource("BoxMesh_body")
+[node name="Floor" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+mesh = SubResource("BoxMesh_floor")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="Ceiling" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.95, 0)
+mesh = SubResource("BoxMesh_ceiling")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="LeftWall" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.95, 1, 0)
+mesh = SubResource("BoxMesh_side_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="RightWall" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.95, 1, 0)
+mesh = SubResource("BoxMesh_side_wall")
+surface_material_override/0 = SubResource("StandardMaterial3D_body")
+
+[node name="RearWall" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 2.95)
+mesh = SubResource("BoxMesh_rear_wall")
 surface_material_override/0 = SubResource("StandardMaterial3D_body")
 
 [node name="TailBoom" type="MeshInstance3D" parent="."]
@@ -91,6 +133,21 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.5, 7.3)
 [node name="Blade" type="MeshInstance3D" parent="TailRotor"]
 mesh = SubResource("BoxMesh_tail_rotor")
 surface_material_override/0 = SubResource("StandardMaterial3D_rotor")
+
+[node name="TailBoomCollider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, 0, 1.2, 5)
+shape = SubResource("CapsuleShape3D_tailboom")
+
+[node name="Blade1Collider" type="CollisionShape3D" parent="MainRotor"]
+shape = SubResource("BoxShape3D_main_blade1")
+
+[node name="Blade2Collider" type="CollisionShape3D" parent="MainRotor"]
+transform = Transform3D(0, 0, -1, 0, 1, 0, 1, 0, 0, 0, 0, 0)
+shape = SubResource("BoxShape3D_main_blade2")
+
+[node name="TailRotorCollider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.5, 1.5, 7.3)
+shape = SubResource("BoxShape3D_tail_rotor")
 
 [node name="SkidLeft" type="MeshInstance3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 0, -1, 0, 1, 0, -0.8, -0.3, 0)
@@ -123,16 +180,6 @@ surface_material_override/0 = SubResource("StandardMaterial3D_heli_dashboard")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, -0.82)
 mesh = SubResource("BoxMesh_heli_coaming")
 surface_material_override/0 = SubResource("StandardMaterial3D_heli_dashboard")
-
-[node name="LeftPanel" type="MeshInstance3D" parent="Cockpit"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.85, 0.1, -0.4)
-mesh = SubResource("BoxMesh_heli_dashboard")
-surface_material_override/0 = SubResource("StandardMaterial3D_body")
-
-[node name="RightPanel" type="MeshInstance3D" parent="Cockpit"]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.85, 0.1, -0.4)
-mesh = SubResource("BoxMesh_heli_dashboard")
-surface_material_override/0 = SubResource("StandardMaterial3D_body")
 
 [node name="Instruments" type="Node3D" parent="Cockpit"]
 

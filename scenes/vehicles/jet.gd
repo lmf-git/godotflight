@@ -104,6 +104,9 @@ const AIR_DENSITY: float = 1.225
 @onready var landing_gear: Node3D = $LandingGear
 @onready var debug_draw: Node3D = $DebugDraw
 
+# Afterburner particles
+var afterburner_particles: GPUParticles3D
+
 # Wheel colliders
 @onready var front_wheel_col: CollisionShape3D = $FrontWheelCollider
 @onready var left_wheel_col: CollisionShape3D = $LeftWheelCollider
@@ -145,6 +148,9 @@ func _ready() -> void:
 	gun = AircraftGun.new()
 	gun.position = Vector3(0, -0.1, -10.5)  # Under nose
 	add_child(gun)
+
+	# Create afterburner particles
+	_create_afterburner()
 
 func _input(event: InputEvent) -> void:
 	if not is_occupied:
@@ -199,6 +205,20 @@ func _process(delta: float) -> void:
 		var muzzle := gun.global_position
 		var forward := -global_transform.basis.z
 		gun.fire(muzzle, forward, linear_velocity)
+
+	# Afterburner particles
+	if afterburner_particles:
+		afterburner_particles.emitting = engine_running and throttle > 0.1
+		var mat: ParticleProcessMaterial = afterburner_particles.process_material
+		if mat:
+			var speed_scale := throttle * 4.0
+			if afterburner_active and throttle > 0.5:
+				speed_scale *= 2.0
+				mat.color = Color(0.4, 0.6, 1.0, 0.8)  # Blue-white afterburner
+			else:
+				mat.color = Color(1.0, 0.6, 0.2, 0.6)  # Orange exhaust
+			mat.initial_velocity_min = speed_scale
+			mat.initial_velocity_max = speed_scale * 1.5
 
 	# Landing gear animation
 	var target_gear: float = 1.0 if gear_down else 0.0
@@ -502,6 +522,56 @@ func _animate_control_surfaces() -> void:
 	if rudder_mesh:
 		rudder_mesh.rotation.y = rudder_input * max_deflection
 
+func _create_afterburner() -> void:
+	afterburner_particles = GPUParticles3D.new()
+	afterburner_particles.position = Vector3(0, 0, 8.5)  # Behind exhaust nozzle
+	afterburner_particles.amount = 64
+	afterburner_particles.lifetime = 0.4
+	afterburner_particles.emitting = false
+
+	var mat := ParticleProcessMaterial.new()
+	mat.direction = Vector3(0, 0, 1)  # Emit backward (+Z = behind plane)
+	mat.spread = 8.0
+	mat.initial_velocity_min = 3.0
+	mat.initial_velocity_max = 6.0
+	mat.gravity = Vector3.ZERO
+	mat.scale_min = 0.15
+	mat.scale_max = 0.35
+	mat.color = Color(1.0, 0.6, 0.2, 0.6)
+	# Fade out
+	var alpha_curve := CurveTexture.new()
+	var curve := Curve.new()
+	curve.add_point(Vector2(0, 1.0))
+	curve.add_point(Vector2(0.5, 0.8))
+	curve.add_point(Vector2(1.0, 0.0))
+	alpha_curve.curve = curve
+	mat.alpha_curve = alpha_curve
+	# Scale down over lifetime
+	var scale_curve := CurveTexture.new()
+	var scurve := Curve.new()
+	scurve.add_point(Vector2(0, 1.0))
+	scurve.add_point(Vector2(1.0, 0.3))
+	scale_curve.curve = scurve
+	mat.scale_curve = scale_curve
+
+	afterburner_particles.process_material = mat
+
+	# Use a small quad mesh for each particle
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(0.3, 0.3)
+	var mesh_mat := StandardMaterial3D.new()
+	mesh_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mesh_mat.albedo_color = Color.WHITE
+	mesh_mat.emission_enabled = true
+	mesh_mat.emission = Color(1.0, 0.6, 0.2)
+	mesh_mat.emission_energy_multiplier = 3.0
+	mesh_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	mesh_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mesh.material = mesh_mat
+	afterburner_particles.draw_pass_1 = mesh
+
+	add_child(afterburner_particles)
+
 func _break_next_part() -> void:
 	if damage_index >= damage_sequence.size():
 		print("All parts already destroyed!")
@@ -628,13 +698,14 @@ func _destroy_left_wing() -> void:
 		return
 	has_left_wing = false
 	if left_wing_mesh:
-		left_wing_mesh.visible = false
+		spawn_debris(left_wing_mesh, 120.0)
+		left_wing_mesh = null
 	if left_wing_collider:
 		left_wing_collider.set_deferred("disabled", true)
 	if landing_gear:
 		var left_gear: Node3D = landing_gear.get_node_or_null("LeftGear")
 		if left_gear:
-			left_gear.visible = false
+			spawn_debris(left_gear, 20.0)
 	if left_wheel_col:
 		left_wheel_col.set_deferred("disabled", true)
 	print("Left wing destroyed!")
@@ -644,13 +715,14 @@ func _destroy_right_wing() -> void:
 		return
 	has_right_wing = false
 	if right_wing_mesh:
-		right_wing_mesh.visible = false
+		spawn_debris(right_wing_mesh, 120.0)
+		right_wing_mesh = null
 	if right_wing_collider:
 		right_wing_collider.set_deferred("disabled", true)
 	if landing_gear:
 		var right_gear: Node3D = landing_gear.get_node_or_null("RightGear")
 		if right_gear:
-			right_gear.visible = false
+			spawn_debris(right_gear, 20.0)
 	if right_wheel_col:
 		right_wheel_col.set_deferred("disabled", true)
 	print("Right wing destroyed!")
@@ -660,7 +732,8 @@ func _destroy_horizontal_tail() -> void:
 		return
 	has_horizontal_tail = false
 	if horizontal_tail_mesh:
-		horizontal_tail_mesh.visible = false
+		spawn_debris(horizontal_tail_mesh, 50.0)
+		horizontal_tail_mesh = null
 	if htail_collider:
 		htail_collider.set_deferred("disabled", true)
 	print("Horizontal tail destroyed!")
@@ -670,7 +743,8 @@ func _destroy_vertical_tail() -> void:
 		return
 	has_vertical_tail = false
 	if vertical_tail_mesh:
-		vertical_tail_mesh.visible = false
+		spawn_debris(vertical_tail_mesh, 35.0)
+		vertical_tail_mesh = null
 	if vtail_collider:
 		vtail_collider.set_deferred("disabled", true)
 	print("Vertical tail destroyed!")
@@ -695,7 +769,7 @@ func _break_gear(which: String) -> void:
 	else:
 		return
 	if gear_node:
-		gear_node.visible = false
+		spawn_debris(gear_node, 15.0)
 	print("%s gear collapsed!" % which.capitalize())
 
 # === MISSILES ===

@@ -306,8 +306,8 @@ mesh = SubResource("BoxMesh_intake")
 surface_material_override/0 = SubResource("StandardMaterial3D_intake")
 
 [node name="Exhaust" type="MeshInstance3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 8.8)
-mesh = SubResource("BoxMesh_exhaust")
+transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 7.75)
+mesh = SubResource("CylinderMesh_exhaust")
 surface_material_override/0 = SubResource("StandardMaterial3D_exhaust")
 
 [node name="LandingGear" type="Node3D" parent="."]
