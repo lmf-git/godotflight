@@ -373,7 +373,8 @@ func _update_objective_beacons() -> void:
 			continue
 		var wx: float = _objective_markers[i].x
 		var wz: float = _objective_markers[i].y
-		node.global_position = Vector3(wx - world_off.x, 0.0, wz - world_off.z)
+		var wy: float = _sample_height(wx, wz)
+		node.global_position = Vector3(wx - world_off.x, wy, wz - world_off.z)
 
 
 # --- Inner class for map objective overlay ---

@@ -477,18 +477,31 @@ func _apply_flight_physics(delta: float) -> void:
 		var yaw_torque: Vector3 = up * rudder_input * rudder_authority * control_effectiveness
 		apply_torque(yaw_torque)
 
-	# === SIDESLIP SIDE FORCE ===
-	var local_vel := get_local_velocity()
-	if airspeed > 5.0:
-		var sideslip := atan2(local_vel.x, -local_vel.z)
-		var side_force := -right * sideslip * dynamic_pressure * wing_area * 0.15
-		apply_central_force(side_force)
+	# === CROSS-FLOW DRAG ===
+	# Fuselage side area is 10-15× larger than frontal area, so velocity components
+	# perpendicular to the nose suffer far more drag than forward motion.
+	# This keeps the velocity vector locked to where the aircraft is pointing.
+	if airspeed > 1.0:
+		var v_along := linear_velocity.dot(forward)
+		var v_cross := linear_velocity - forward * v_along
+		var cross_speed := v_cross.length()
+		if cross_speed > 0.1:
+			var cross_q := 0.5 * AIR_DENSITY * cross_speed * cross_speed
+			apply_central_force(-v_cross.normalized() * cross_q * 15.0)
 
 	# === MANEUVERING DRAG ===
 	var angular_speed_sq := angular_velocity.length_squared()
 	if angular_speed_sq > 0.01 and airspeed > 5.0:
 		var maneuver_drag := angular_speed_sq * dynamic_pressure * wing_area * 0.006
 		apply_central_force(-linear_velocity.normalized() * maneuver_drag)
+
+	# === AERODYNAMIC RATE DAMPING ===
+	# Tail surfaces resist angular rates proportional to airspeed.
+	# Prevents indefinite yaw/pitch accumulation and speeds up recovery on release.
+	var aero_damp: float = clampf(airspeed / 30.0, 0.0, 1.5)
+	apply_torque(-up      * angular_velocity.dot(up)      * mass * 4.0 * aero_damp)
+	apply_torque(-right   * angular_velocity.dot(right)   * mass * 2.5 * aero_damp)
+	apply_torque(-forward * angular_velocity.dot(forward) * mass * 0.8 * aero_damp)
 
 	# === GROUND FORCES ===
 	_apply_ground_forces(delta)
@@ -528,12 +541,11 @@ func _apply_stability(_delta: float, up: Vector3, forward: Vector3, right: Vecto
 	var vtail_factor: float = 1.0 if has_vertical_tail else 0.2
 	var htail_factor: float = 1.0 if has_horizontal_tail else 0.2
 
-	# Weathervane stability — suppressed only while rudder is actively pressed
+	# Weathervane stability — always active; rudder fights against it (realistic)
 	var local_vel: Vector3 = get_local_velocity()
 	if local_vel.length() > 5.0:
 		var sideslip: float = atan2(local_vel.x, -local_vel.z)
-		var yaw_scale := clampf(1.0 - absf(rudder_input) / 0.15, 0.0, 1.0)
-		apply_torque(-up * sideslip * yaw_stability * mass * yaw_scale * vtail_factor)
+		apply_torque(-up * sideslip * yaw_stability * mass * vtail_factor)
 
 	var forward_horizontal: Vector3 = Vector3(forward.x, 0, forward.z).normalized()
 	var pitch_angle: float = forward.angle_to(forward_horizontal) if forward_horizontal.length() > 0.01 else 0.0
