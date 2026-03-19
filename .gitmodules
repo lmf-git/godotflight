@@ -1,0 +1,3 @@
+[submodule "rust/jsbsim_fdm/jsbsim"]
+	path = rust/jsbsim_fdm/jsbsim
+	url = https://github.com/JSBSim-Team/jsbsim.git
