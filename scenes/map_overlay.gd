@@ -8,11 +8,13 @@ extends CanvasLayer
 const MAP_SIZE := 256          # pixels (lower res, terrain is summarised)
 const MIN_VIEW_RADIUS := 1500.0
 const MAX_VIEW_RADIUS := 50000.0
-const ZOOM_STEP := 1.3         # multiplier per scroll tick
+const ZOOM_STEP := 1.12        # multiplier per scroll tick
 const RUNWAY_HALF_W := 15.0
 const RUNWAY_HALF_L := 750.0
+const _SAVE_PATH := "user://map_settings.cfg"
 
 var _view_radius := 12000.0    # current zoom level (meters from center to edge)
+var _pan_accum := 0.0          # accumulated trackpad pan delta
 var _terrain_tex: ImageTexture
 var _noise: FastNoiseLite
 var _detail_noise: FastNoiseLite
@@ -29,8 +31,17 @@ var _coords_label: Label
 
 func _ready() -> void:
 	visible = false
+	_load_settings()
 	_setup_noise()
 	_build_ui()
+	add_to_group("map_overlay")
+
+func toggle() -> void:
+	visible = not visible
+	if visible:
+		_generate_map()
+	else:
+		_free_map_texture()
 
 
 func _input(event: InputEvent) -> void:
@@ -54,12 +65,15 @@ func _input(event: InputEvent) -> void:
 			_zoom_out()
 			get_viewport().set_input_as_handled()
 
-	# Mac trackpad: two-finger scroll
+	# Mac trackpad: two-finger scroll — accumulate to avoid over-sensitivity
 	if event is InputEventPanGesture:
-		if event.delta.y < -0.1:
+		_pan_accum += event.delta.y
+		if _pan_accum < -8.0:
 			_zoom_in()
-		elif event.delta.y > 0.1:
+			_pan_accum = 0.0
+		elif _pan_accum > 8.0:
 			_zoom_out()
+			_pan_accum = 0.0
 		get_viewport().set_input_as_handled()
 
 	# Mac trackpad: pinch to zoom
@@ -161,7 +175,7 @@ func _build_map_image(cx: float, cz: float, radius: float) -> void:
 	var img := Image.create(MAP_SIZE, MAP_SIZE, false, Image.FORMAT_RGB8)
 	var extent := radius * 2.0
 	for py in range(MAP_SIZE):
-		var wz := cz + (float(py) / MAP_SIZE - 0.5) * extent
+		var wz := cz + (0.5 - float(py) / MAP_SIZE) * extent
 		for px in range(MAP_SIZE):
 			var wx := cx + (float(px) / MAP_SIZE - 0.5) * extent
 
@@ -188,12 +202,26 @@ func _free_map_texture() -> void:
 
 func _zoom_in() -> void:
 	_view_radius = maxf(_view_radius / ZOOM_STEP, MIN_VIEW_RADIUS)
+	_save_settings()
 	_generate_map()
 
 
 func _zoom_out() -> void:
 	_view_radius = minf(_view_radius * ZOOM_STEP, MAX_VIEW_RADIUS)
+	_save_settings()
 	_generate_map()
+
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("map", "view_radius", _view_radius)
+	cfg.save(_SAVE_PATH)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_SAVE_PATH) == OK:
+		_view_radius = cfg.get_value("map", "view_radius", 12000.0)
 
 
 func _sample_height(world_x: float, world_z: float) -> float:
@@ -249,7 +277,7 @@ func _update_marker() -> void:
 	_marker.position = Vector2(map_px * 0.5, map_px * 0.5)
 
 	var heading := -cam.global_basis.z
-	_marker.heading_angle = atan2(heading.x, heading.z)
+	_marker.heading_angle = atan2(heading.x, -heading.z)
 	_marker.queue_redraw()
 
 	var world_pos := _get_player_world_pos()
@@ -266,5 +294,5 @@ class _MarkerNode extends Control:
 	func _draw() -> void:
 		draw_circle(Vector2.ZERO, _MARKER_RADIUS, Color.WHITE)
 		draw_circle(Vector2.ZERO, _MARKER_RADIUS - 2, Color(1.0, 0.3, 0.2))
-		var dir := Vector2(sin(heading_angle), cos(heading_angle))
+		var dir := Vector2(sin(heading_angle), -cos(heading_angle))
 		draw_line(Vector2.ZERO, dir * _HEADING_LINE_LEN, Color.WHITE, 2.0)

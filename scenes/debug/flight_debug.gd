@@ -26,7 +26,7 @@ func _ready() -> void:
 	_create_hud()
 
 func _process(_delta: float) -> void:
-	var should_show: bool = visible and is_visible_in_tree()
+	var should_show: bool = visible and is_visible_in_tree() and vehicle.is_occupied
 
 	# Sync HUD panel visibility - hide panels directly since CanvasLayer doesn't inherit 3D visibility
 	var canvas := get_node_or_null("DebugHUD")
@@ -195,43 +195,51 @@ func _update_hud() -> void:
 
 	# RIGHT PANEL - Controls
 	var ctrl_text := ""
-	ctrl_text += "=== CONTROLS ===\n\n"
+	ctrl_text += "=== CONTROLS ===\n"
 	if v is Helicopter:
-		ctrl_text += "SHIFT/Z:\n  Collective up/down\n\n"
-		ctrl_text += "MOUSE:\n  Cyclic (pitch/roll)\n\n"
-		ctrl_text += "W/S:\n  Pitch fwd/back\n\n"
-		ctrl_text += "A/D:\n  Roll left/right\n\n"
-		ctrl_text += "Q/E:\n  Pedals (yaw)\n\n"
-		ctrl_text += "ALT:\n  Freelook\n\n"
-		ctrl_text += "J:\n  Break part\n\n"
+		ctrl_text += "SHIFT/Z: Collective up/down\n"
+		ctrl_text += "MOUSE: Cyclic (pitch/roll)\n"
+		ctrl_text += "W/S: Pitch fwd/back\n"
+		ctrl_text += "A/D: Roll left/right\n"
+		ctrl_text += "Q/E: Pedals (yaw)\n"
+		ctrl_text += "ALT: Freelook\n"
+		ctrl_text += "J: Break part\n"
 	elif v is FixedWing:
-		ctrl_text += "SHIFT/Z:\n  Throttle up/down\n\n"
-		ctrl_text += "MOUSE:\n  Pitch and Roll\n\n"
-		ctrl_text += "W/S:\n  Pitch down/up\n\n"
-		ctrl_text += "A/D:\n  Ailerons (roll)\n\n"
-		ctrl_text += "Q/E:\n  Rudder (yaw)\n\n"
-		ctrl_text += "F/V:\n  Flaps up/down\n\n"
-		ctrl_text += "L:\n  Toggle landing gear\n\n"
-		ctrl_text += "ALT:\n  Freelook\n\n"
-		ctrl_text += "J:\n  Break part\n\n"
+		ctrl_text += "SHIFT/Z: Throttle up/down\n"
+		ctrl_text += "MOUSE: Pitch and Roll\n"
+		ctrl_text += "W/S: Pitch down/up\n"
+		ctrl_text += "A/D: Ailerons (roll)\n"
+		ctrl_text += "Q/E: Rudder (yaw)\n"
+		ctrl_text += "SCROLL: Flaps up/down\n"
+		ctrl_text += "RMB: Zoom\n"
+		ctrl_text += "CTRL+RMB: Sensor view\n"
+		ctrl_text += "B: Speedbrakes\n"
+		ctrl_text += "K: Autobrake arm/off\n"
+		ctrl_text += "L: Toggle landing gear\n"
+		ctrl_text += "ALT: Freelook\n"
+		ctrl_text += "J: Break part\n"
 	elif v is Jet:
-		ctrl_text += "SHIFT/Z:\n  Throttle up/down\n\n"
-		ctrl_text += "MOUSE:\n  Pitch and Roll\n\n"
-		ctrl_text += "W/S:\n  Pitch down/up\n\n"
-		ctrl_text += "A/D:\n  Ailerons (roll)\n\n"
-		ctrl_text += "Q/E:\n  Rudder (yaw)\n\n"
-		ctrl_text += "B:\n  Toggle afterburner\n\n"
-		ctrl_text += "F/V:\n  Flaps up/down\n\n"
-		ctrl_text += "L:\n  Toggle landing gear\n\n"
-		ctrl_text += "ALT:\n  Freelook\n\n"
-		ctrl_text += "J:\n  Break part\n\n"
+		ctrl_text += "SHIFT/Z: Throttle up/down\n"
+		ctrl_text += "MOUSE: Pitch and Roll\n"
+		ctrl_text += "W/S: Pitch down/up\n"
+		ctrl_text += "A/D: Ailerons (roll)\n"
+		ctrl_text += "Q/E: Rudder (yaw)\n"
+		ctrl_text += "B: Toggle afterburner\n"
+		ctrl_text += "SCROLL: Flaps up/down\n"
+		ctrl_text += "RMB: Zoom\n"
+		ctrl_text += "CTRL+RMB: Sensor view\n"
+		ctrl_text += "N: Speedbrakes\n"
+		ctrl_text += "K: Autobrake arm/off\n"
+		ctrl_text += "L: Toggle landing gear\n"
+		ctrl_text += "ALT: Freelook\n"
+		ctrl_text += "J: Break part\n"
 	elif v is Car:
-		ctrl_text += "W:\n  Accelerate\n\n"
-		ctrl_text += "S:\n  Brake\n\n"
-		ctrl_text += "Q/E:\n  Steer left/right\n\n"
-		ctrl_text += "J:\n  Break wheel\n\n"
-	ctrl_text += "U:\n  Exit vehicle\n\n"
-	ctrl_text += "O:\n  Toggle camera\n\n"
+		ctrl_text += "W: Accelerate\n"
+		ctrl_text += "S: Brake\n"
+		ctrl_text += "Q/E: Steer left/right\n"
+		ctrl_text += "J: Break wheel\n"
+	ctrl_text += "U: Exit vehicle\n"
+	ctrl_text += "O: Toggle camera\n"
 	ctrl_text += "[P] Toggle Debug"
 
 	controls_label.text = ctrl_text

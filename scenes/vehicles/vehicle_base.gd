@@ -40,7 +40,7 @@ const TURBULENCE_INTENSITY := 0.002  # Very subtle
 # Mouse input accumulator
 var mouse_input := Vector2.ZERO
 const MOUSE_SENSITIVITY := 0.003
-const MOUSE_RETURN_SPEED := 3.0
+const MOUSE_RETURN_SPEED := 5.0
 
 # Camera state
 var use_third_person := false
@@ -50,7 +50,10 @@ var freelook_yaw: float = 0.0
 var freelook_pitch: float = 0.0
 var _alt_was_pressed := false
 var _alt_last_press_time: float = 0.0
+var _zoom_active := false
 const FREELOOK_SENSITIVITY := 0.003
+const FOV_NORMAL := 75.0
+const FOV_ZOOM   := 20.0
 const FREELOOK_RETURN_SPEED := 5.0
 const FREELOOK_MAX_PITCH := 1.4  # ~80 degrees
 const DOUBLE_TAP_TIME := 0.3      # seconds
@@ -111,6 +114,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			mouse_input.x = clamp(mouse_input.x, -1.0, 1.0)
 			mouse_input.y = clamp(mouse_input.y, -1.0, 1.0)
 
+	# Right-click (no modifier): hold to zoom cockpit view
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
+			and not event.ctrl_pressed and not event.alt_pressed:
+		_zoom_active = event.pressed
+		get_viewport().set_input_as_handled()
+
 	# Exit vehicle
 	if event.is_action_pressed("interact"):
 		if current_pilot:
@@ -138,6 +147,11 @@ func _physics_process(delta: float) -> void:
 	elif absf(global_position.y) > MAX_ALTITUDE:
 		global_position.y = signf(global_position.y) * MAX_ALTITUDE
 		linear_velocity.y = 0.0
+
+	# Prevent vehicles from tunneling through the ground from blast impulses.
+	# Cap downward velocity when near ground level so a spike can't skip past terrain.
+	if altitude_agl < 15.0 and linear_velocity.y < -80.0:
+		linear_velocity.y = -80.0
 
 	_update_flight_data()
 
@@ -181,11 +195,23 @@ func _process(delta: float) -> void:
 	# Apply freelook to active camera
 	if cockpit_camera and not use_third_person:
 		cockpit_camera.rotation = Vector3(freelook_pitch, freelook_yaw, 0.0)
+		cockpit_camera.fov = FOV_ZOOM if _zoom_active else FOV_NORMAL
 	if third_person_camera and use_third_person:
-		# Orbit around vehicle center instead of rotating in place
-		var orbit_basis := Basis(Vector3.UP, freelook_yaw) * Basis(Vector3.RIGHT, freelook_pitch)
-		third_person_camera.position = orbit_basis * _tp_default_pos
-		third_person_camera.look_at(global_position)
+		# Build a roll-free basis from forward direction so the camera stays directly
+		# behind the aircraft regardless of bank angle.
+		# Roll rotates around the forward axis, so -basis.z is identical for any roll.
+		var fwd: Vector3 = -global_transform.basis.z
+		# Use world UP to derive a level right vector; fall back to basis.x near vertical
+		# Near-vertical flight: world UP is parallel to fwd, use aircraft right instead
+		var ref_up := Vector3.UP if absf(fwd.dot(Vector3.UP)) < 0.95 else global_transform.basis.x
+		var cam_right: Vector3 = ref_up.cross(fwd).normalized()
+		var cam_up: Vector3 = fwd.cross(cam_right).normalized()
+		var no_roll_basis := Basis(cam_right, cam_up, -fwd)
+		var orbit_basis := no_roll_basis \
+				* Basis(Vector3.UP, freelook_yaw) \
+				* Basis(Vector3.RIGHT, freelook_pitch)
+		third_person_camera.global_position = global_position + orbit_basis * _tp_default_pos
+		third_person_camera.look_at(global_position, cam_up)
 
 func _process_inputs(_delta: float) -> void:
 	# Override in subclasses for specific control schemes
@@ -235,6 +261,7 @@ func _update_flight_data() -> void:
 	_prev_velocity = linear_velocity
 
 var _prev_velocity := Vector3.ZERO
+var _smoothed_aoa: float = 0.0
 
 func mount(player: Player) -> void:
 	is_occupied = true
@@ -296,6 +323,11 @@ func get_exit_position() -> Vector3:
 		return exit_position.global_position
 	return global_position + Vector3(3, 0, 0)
 
+## Override in subclasses to show a role hint when player approaches.
+## Return "" to suppress the indicator (default: single-seat vehicles).
+func get_entry_hint(_player_pos: Vector3) -> String:
+	return "GET IN"
+
 func _on_debug_toggled() -> void:
 	# Show/hide debug visualization
 	var debug_node: Node3D = get_node_or_null("DebugDraw")
@@ -313,15 +345,24 @@ func clear_debug_forces() -> void:
 func get_local_velocity() -> Vector3:
 	return global_transform.basis.inverse() * linear_velocity
 
-# Calculate angle of attack (in the aircraft's symmetry plane, ignoring sideslip)
+# Calculate angle of attack (in the aircraft's symmetry plane, ignoring sideslip).
+# AoA is smoothed based on angular velocity — during rapid maneuvers, transient orientation
+# changes faster than velocity, causing spikes that would otherwise trigger false stalls.
 func calculate_aoa() -> float:
 	var local_vel: Vector3 = get_local_velocity()
-	# Use only the longitudinal plane (Y and Z) — sideslip (X) doesn't affect AoA
 	var forward_speed: float = -local_vel.z
 	var vert_speed: float = -local_vel.y
 	if forward_speed < 0.5 and absf(vert_speed) < 0.5:
-		return 0.0  # Too slow to have meaningful AoA
-	return rad_to_deg(atan2(vert_speed, maxf(forward_speed, 0.5)))
+		_smoothed_aoa = move_toward(_smoothed_aoa, 0.0, 60.0 * get_physics_process_delta_time())
+		return _smoothed_aoa
+	var raw_aoa := rad_to_deg(atan2(vert_speed, maxf(forward_speed, 0.5)))
+	# When AoA is decreasing (nose coming down after pull-up), track fast so it recovers quickly.
+	# When AoA is increasing (pull-up), blend slowly at high angular rates to absorb transient spikes.
+	var ang_rate := angular_velocity.length()
+	var is_decreasing := absf(raw_aoa) < absf(_smoothed_aoa)
+	var blend: float = 0.45 if is_decreasing else clampf(0.45 - ang_rate * 0.12, 0.08, 0.45)
+	_smoothed_aoa = lerpf(_smoothed_aoa, raw_aoa, blend)
+	return _smoothed_aoa
 
 ## Spawn a destroyed part as a free-flying RigidBody3D debris piece.
 ## Takes a mesh node (or Node3D with mesh children), detaches it, and flings it.
@@ -366,6 +407,16 @@ func spawn_debris(part_node: Node3D, part_mass: float = 50.0) -> void:
 	scene_root.add_child(debris)
 	debris.global_transform = world_xform
 
+	# Bidirectional exception: neither the debris nor the vehicle reacts to the other
+	debris.add_collision_exception_with(self)
+	add_collision_exception_with(debris)
+
+	# CCD prevents fast-moving pieces from tunnelling through thin ground/runway geometry
+	debris.continuous_cd = true
+	# Damp rotation so parts tumble realistically rather than spinning forever,
+	# but leave linear_damp at 0 so gravity and inertia are unaffected
+	debris.angular_damp = 1.5
+
 	# Give it the vehicle's velocity plus a random fling
 	debris.linear_velocity = linear_velocity + Vector3(
 		randf_range(-5, 5),
@@ -378,13 +429,27 @@ func spawn_debris(part_node: Node3D, part_mass: float = 50.0) -> void:
 		randf_range(-3, 3)
 	)
 
-	# Auto-despawn after 10 seconds
-	var timer := Timer.new()
-	timer.wait_time = 10.0
-	timer.one_shot = true
-	timer.timeout.connect(func(): debris.queue_free())
-	debris.add_child(timer)
-	timer.start()
+	# Start a 30 s despawn timer on first ground contact
+	debris.contact_monitor = true
+	debris.max_contacts_reported = 1
+	debris.body_entered.connect(func(hit_body: Node):
+		if debris.get_meta("settled", false) or not (hit_body is StaticBody3D):
+			return
+		debris.set_meta("settled", true)
+		var t := Timer.new()
+		t.wait_time = 30.0
+		t.one_shot = true
+		t.timeout.connect(func(): if is_instance_valid(debris): debris.queue_free())
+		debris.add_child(t)
+		t.start()
+	)
+	# Hard fallback: clean up after 60 s even if it never lands
+	var fallback := Timer.new()
+	fallback.wait_time = 60.0
+	fallback.one_shot = true
+	fallback.timeout.connect(func(): if is_instance_valid(debris): debris.queue_free())
+	debris.add_child(fallback)
+	fallback.start()
 
 ## Get combined AABB of a node and its mesh children
 func _get_node_aabb(node: Node3D) -> AABB:

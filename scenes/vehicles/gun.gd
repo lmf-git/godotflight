@@ -60,6 +60,22 @@ func fire(muzzle_pos: Vector3, forward_dir: Vector3, velocity_offset: Vector3) -
 	var hit_dist := RANGE
 	if result:
 		hit_dist = muzzle_pos.distance_to(result.position)
+		var hit_body: Node = result.get("collider")
+		# Walk up the tree to find a node with take_hit (handles sub-shape colliders)
+		while hit_body:
+			if hit_body.has_method("take_hit"):
+				hit_body.take_hit(result.position)
+				# Notify HUD only when the player's gun scores the hit
+				var v := _get_vehicle()
+				if v and v.get("is_occupied") and v.is_occupied:
+					for hud in get_tree().get_nodes_in_group("weapon_hud"):
+						hud.register_hit()
+				break
+			hit_body = hit_body.get_parent() if hit_body.get_parent() is Node3D else null
+		_spawn_bullet_hole(result.position, result.normal)
+
+	# Muzzle flash
+	_spawn_muzzle_flash(muzzle_pos + dir * 1.0)
 
 	# Create tracer visual
 	var mesh_inst := MeshInstance3D.new()
@@ -110,6 +126,49 @@ func _process(delta: float) -> void:
 	# Remove finished tracers (iterate backwards)
 	for i in range(to_remove.size() - 1, -1, -1):
 		_tracers.remove_at(to_remove[i])
+
+func _spawn_muzzle_flash(pos: Vector3) -> void:
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.9, 0.4)
+	light.light_energy = 8.0
+	light.omni_range = 14.0
+	get_tree().current_scene.add_child(light)
+	light.global_position = pos
+	var tw := light.create_tween()
+	tw.tween_property(light, "light_energy", 0.0, 0.055)
+	tw.tween_callback(light.queue_free)
+
+func _spawn_bullet_hole(pos: Vector3, normal: Vector3) -> void:
+	if normal.length_squared() < 0.01:
+		return
+	var n := normal.normalized()
+	var arbitrary := Vector3.FORWARD if absf(n.dot(Vector3.UP)) > 0.9 else Vector3.UP
+	var right := n.cross(arbitrary).normalized()
+	var fwd := right.cross(n).normalized()
+
+	var root := Node3D.new()
+	get_tree().current_scene.add_child(root)
+	root.global_position = pos + n * 0.02
+	root.global_transform.basis = Basis(right, n, -fwd)
+
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.05, 0.04, 0.03, 0.9)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
+	var mi := MeshInstance3D.new()
+	var quad := PlaneMesh.new()
+	quad.size = Vector2(0.3, 0.3)
+	mi.mesh = quad
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.add_child(mi)
+
+	var tw := root.create_tween()
+	tw.tween_interval(20.0)
+	tw.tween_method(func(a: float): mat.albedo_color.a = a, 0.9, 0.0, 3.0)
+	tw.tween_callback(root.queue_free)
 
 func _get_vehicle() -> Vehicle:
 	var parent := get_parent()

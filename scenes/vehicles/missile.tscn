@@ -70,11 +70,11 @@ color = Color(1, 0.7, 0.2, 1)
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_smoke_particle"]
 transparency = 1
 shading_mode = 0
-albedo_color = Color(0.8, 0.8, 0.8, 0.35)
+albedo_color = Color(0.3, 0.3, 0.3, 0.85)
 billboard_mode = 3
 
 [sub_resource type="QuadMesh" id="QuadMesh_smoke_particle"]
-size = Vector2(0.25, 0.25)
+size = Vector2(1.5, 1.5)
 material = SubResource("StandardMaterial3D_smoke_particle")
 
 [sub_resource type="ParticleProcessMaterial" id="ParticleProcessMaterial_smoke"]
@@ -82,13 +82,13 @@ lifetime_randomness = 0.4
 emission_shape = 1
 emission_sphere_radius = 0.03
 direction = Vector3(0, 0, 1)
-spread = 15.0
-initial_velocity_min = 2.0
-initial_velocity_max = 5.0
-gravity = Vector3(0, 1, 0)
-scale_min = 0.5
-scale_max = 4.0
-color = Color(0.7, 0.7, 0.7, 0.5)
+spread = 8.0
+initial_velocity_min = 1.0
+initial_velocity_max = 3.0
+gravity = Vector3(0, 0.5, 0)
+scale_min = 1.0
+scale_max = 14.0
+color = Color(0.25, 0.25, 0.25, 0.9)
 
 [node name="Missile" type="RigidBody3D"]
 collision_layer = 8
@@ -131,9 +131,9 @@ visibility_aabb = AABB(-2, -2, -2, 4, 4, 12)
 [node name="SmokeTrail" type="GPUParticles3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.75)
 emitting = false
-amount = 80
-lifetime = 3.0
+amount = 250
+lifetime = 8.0
 local_coords = false
 process_material = SubResource("ParticleProcessMaterial_smoke")
 draw_pass_1 = SubResource("QuadMesh_smoke_particle")
-visibility_aabb = AABB(-5, -5, -5, 10, 10, 60)
+visibility_aabb = AABB(-30, -30, -30, 60, 60, 300)

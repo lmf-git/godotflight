@@ -5,9 +5,8 @@
 [ext_resource type="Script" path="res://scenes/vehicles/cockpit.gd" id="3_cockpit"]
 [ext_resource type="Script" path="res://scenes/vehicles/engine_audio.gd" id="4_audio"]
 
-[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
-radius = 0.55
-height = 16
+[sub_resource type="BoxShape3D" id="CapsuleShape3D_body"]
+size = Vector3(1.1, 1.1, 16)
 
 [sub_resource type="BoxShape3D" id="BoxShape3D_wing_left"]
 size = Vector3(5, 0.12, 2.5)
@@ -179,6 +178,9 @@ size = Vector3(0.1, 0.25, 0.1)
 [sub_resource type="BoxShape3D" id="BoxShape3D_throttle_hit"]
 size = Vector3(0.06, 0.12, 0.06)
 
+[sub_resource type="BoxMesh" id="BoxMesh_speedbrake"]
+size = Vector3(1.5, 0.05, 0.8)
+
 [node name="Jet" type="RigidBody3D"]
 collision_layer = 4
 collision_mask = 5
@@ -190,7 +192,7 @@ continuous_cd = true
 script = ExtResource("1_script")
 
 [node name="BodyCollision" type="CollisionShape3D" parent="."]
-transform = Transform3D(1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, -1)
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1)
 shape = SubResource("CapsuleShape3D_body")
 
 [node name="LeftWingCollider" type="CollisionShape3D" parent="."]
@@ -256,6 +258,11 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.2, 0, 1.2)
 mesh = SubResource("BoxMesh_aileron")
 surface_material_override/0 = SubResource("StandardMaterial3D_control")
 
+[node name="LeftSpeedbrake" type="MeshInstance3D" parent="LeftWing"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0, 0.1, 0.3)
+mesh = SubResource("BoxMesh_speedbrake")
+surface_material_override/0 = SubResource("StandardMaterial3D_control")
+
 [node name="RightWing" type="MeshInstance3D" parent="."]
 transform = Transform3D(0.966, 0, -0.259, 0, 1, 0, 0.259, 0, 0.966, 2.5, 0.1, 1)
 mesh = SubResource("BoxMesh_wing_right")
@@ -264,6 +271,11 @@ surface_material_override/0 = SubResource("StandardMaterial3D_wing")
 [node name="RightAileron" type="MeshInstance3D" parent="RightWing"]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.2, 0, 1.2)
 mesh = SubResource("BoxMesh_aileron")
+surface_material_override/0 = SubResource("StandardMaterial3D_control")
+
+[node name="RightSpeedbrake" type="MeshInstance3D" parent="RightWing"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.0, 0.1, 0.3)
+mesh = SubResource("BoxMesh_speedbrake")
 surface_material_override/0 = SubResource("StandardMaterial3D_control")
 
 [node name="HorizontalTail" type="MeshInstance3D" parent="."]

@@ -1,0 +1,61 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scenes/vehicles/tank.gd" id="1_script"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_hull"]
+size = Vector3(3.8, 1.2, 7.0)
+
+[node name="Tank" type="RigidBody3D"]
+collision_layer = 4
+collision_mask = 5
+mass = 40000.0
+script = ExtResource("1_script")
+
+[node name="CockpitCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, -2.0)
+fov = 70.0
+
+[node name="ThirdPersonCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.97, 0.26, 0, -0.26, 0.97, 0, 7.0, 12.0)
+
+[node name="ExitPosition" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.5, 1.5, 0)
+
+[node name="DebugDraw" type="Node3D" parent="."]
+
+[node name="HullCollision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.6, 0)
+shape = SubResource("BoxShape3D_hull")
+
+[node name="Turret" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.15, -0.5)
+
+[node name="Barrel" type="Node3D" parent="Turret"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.35, 0)
+
+[node name="MuzzlePoint" type="Marker3D" parent="Turret/Barrel"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -3.0)
+
+[node name="SuspensionRayFL" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7, 0.65, -2.6)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayFR" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.7, 0.65, -2.6)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayRL" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.7, 0.65, 2.6)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayRR" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.7, 0.65, 2.6)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true

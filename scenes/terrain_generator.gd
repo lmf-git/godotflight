@@ -44,7 +44,7 @@ func _ready() -> void:
 	_material.albedo_color = Color(0.3, 0.45, 0.2, 1.0)
 	_material.roughness = 0.9
 	_material.vertex_color_use_as_albedo = true
-	_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_material.cull_mode = BaseMaterial3D.CULL_BACK
 
 	_update_chunks()
 

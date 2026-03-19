@@ -1,2 +1,8 @@
+# Godot editor cache
 .godot/
+
+# Claude memory
 .claude/
+
+# macOS
+.DS_Store

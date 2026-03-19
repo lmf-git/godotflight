@@ -39,6 +39,11 @@ var _start_button_mesh: MeshInstance3D
 var _start_button_label: Label3D
 var _start_button_last_state := false
 
+# Autobrake button
+var _autobrake_button_mesh: MeshInstance3D
+var _autobrake_button_label: Label3D
+var _autobrake_last_state := false
+
 func _ready() -> void:
 	vehicle = get_parent() as Vehicle
 	if stall_warning:
@@ -51,6 +56,8 @@ func _ready() -> void:
 func _deferred_setup() -> void:
 	if vehicle and vehicle.requires_startup:
 		_create_start_button()
+	if vehicle and "autobrake_active" in vehicle:
+		_create_autobrake_button()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not vehicle or not vehicle.is_occupied:
@@ -82,6 +89,8 @@ func _process(_delta: float) -> void:
 	_update_artificial_horizon()
 	if _start_button_label:
 		_update_start_button()
+	if _autobrake_button_label:
+		_update_autobrake_button()
 
 func _animate_controls() -> void:
 	# Joystick rotates with pitch (X) and roll (Z) inputs
@@ -124,7 +133,12 @@ func _update_instruments() -> void:
 
 	if flaps_label:
 		if "flaps_input" in vehicle:
-			flaps_label.text = "FLAP %2.0f" % (vehicle.flaps_input * 100.0)
+			if "speedbrake_active" in vehicle and vehicle.speedbrake_active:
+				flaps_label.text = "SB OPEN"
+				flaps_label.modulate = Color.ORANGE
+			else:
+				flaps_label.text = "FLAP %2.0f" % (vehicle.flaps_input * 100.0)
+				flaps_label.modulate = Color.WHITE
 
 	if stall_warning:
 		if "is_stalled" in vehicle:
@@ -132,11 +146,12 @@ func _update_instruments() -> void:
 
 # === CLICK + DRAG INTERACTION ===
 
-func _try_start_drag() -> void:
-	# Raycast from the cockpit camera into the scene
+# Returns true if the click was consumed by a cockpit interactive area.
+# Called by the vehicle before weapon firing so cockpit buttons take priority.
+func handle_cockpit_click() -> bool:
 	var camera: Camera3D = vehicle.cockpit_camera
 	if not camera or not camera.current:
-		return
+		return false
 
 	var viewport := get_viewport()
 	var mouse_pos := viewport.get_mouse_position()
@@ -153,25 +168,32 @@ func _try_start_drag() -> void:
 	var result := space_state.intersect_ray(query)
 
 	if result.is_empty():
-		return
+		return false
 
 	var hit_node: Node = result.collider
-	# Walk up to find if it's a joystick, throttle, or start button area
 	while hit_node:
 		if hit_node.name == "JoystickArea":
 			_drag_target = DragTarget.JOYSTICK
 			_drag_pitch = vehicle.input_pitch
 			_drag_roll = vehicle.input_roll
-			return
+			return true
 		elif hit_node.name == "ThrottleArea":
 			_drag_target = DragTarget.THROTTLE
 			_drag_throttle = vehicle.throttle if "throttle" in vehicle else vehicle.input_throttle
-			return
+			return true
 		elif hit_node.name == "StartButtonArea":
 			vehicle.engine_running = not vehicle.engine_running
 			_update_start_button()
-			return
+			return true
+		elif hit_node.name == "AutobrakeButtonArea":
+			if "autobrake_active" in vehicle:
+				vehicle.autobrake_active = not vehicle.autobrake_active
+			return true
 		hit_node = hit_node.get_parent()
+	return false
+
+func _try_start_drag() -> void:
+	handle_cockpit_click()
 
 func _stop_drag() -> void:
 	_drag_target = DragTarget.NONE
@@ -326,3 +348,76 @@ func _update_start_button() -> void:
 		_start_button_label.text = "ENG ON" if running else "ENG OFF"
 		_start_button_label.modulate = Color(0.3, 1, 0.3) if running else Color(1, 0.3, 0.3)
 		_start_button_label.outline_modulate = Color(0, 0.1, 0) if running else Color(0.2, 0, 0)
+
+
+# === AUTOBRAKE BUTTON ===
+
+func _create_autobrake_button() -> void:
+	var instruments := get_node_or_null("Instruments")
+	var dash_z := -0.74
+	if instruments and instruments.get_child_count() > 0:
+		dash_z = instruments.get_child(0).position.z - 0.005
+
+	var btn_root := Node3D.new()
+	btn_root.name = "AutobrakeButton"
+	btn_root.position = Vector3(0.38, -0.22, dash_z)
+	add_child(btn_root)
+
+	var housing_mesh := BoxMesh.new()
+	housing_mesh.size = Vector3(0.1, 0.06, 0.02)
+	var housing := MeshInstance3D.new()
+	housing.mesh = housing_mesh
+	var housing_mat := StandardMaterial3D.new()
+	housing_mat.albedo_color = Color(0.08, 0.08, 0.08)
+	housing.material_override = housing_mat
+	btn_root.add_child(housing)
+
+	var cap_mesh := CylinderMesh.new()
+	cap_mesh.top_radius = 0.035
+	cap_mesh.bottom_radius = 0.035
+	cap_mesh.height = 0.02
+	_autobrake_button_mesh = MeshInstance3D.new()
+	_autobrake_button_mesh.mesh = cap_mesh
+	_autobrake_button_mesh.position = Vector3(0, 0, 0.015)
+	_autobrake_button_mesh.rotation = Vector3(PI / 2.0, 0, 0)
+	btn_root.add_child(_autobrake_button_mesh)
+
+	var area := Area3D.new()
+	area.name = "AutobrakeButtonArea"
+	area.position = Vector3(0, 0, 0.01)
+	var col := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(0.12, 0.08, 0.04)
+	col.shape = shape
+	area.add_child(col)
+	btn_root.add_child(area)
+
+	_autobrake_button_label = Label3D.new()
+	_autobrake_button_label.pixel_size = 0.002
+	_autobrake_button_label.font_size = 14
+	_autobrake_button_label.outline_size = 4
+	_autobrake_button_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_autobrake_button_label.position = Vector3(0, 0.055, 0.01)
+	btn_root.add_child(_autobrake_button_label)
+
+	_autobrake_last_state = not ("autobrake_active" in vehicle and vehicle.autobrake_active)
+	_update_autobrake_button()
+
+
+func _update_autobrake_button() -> void:
+	if not vehicle or not ("autobrake_active" in vehicle):
+		return
+	var armed: bool = vehicle.autobrake_active
+	if armed == _autobrake_last_state:
+		return
+	_autobrake_last_state = armed
+	if _autobrake_button_mesh:
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.9, 0.6, 0.0) if armed else Color(0.2, 0.2, 0.2)
+		mat.emission_enabled = true
+		mat.emission = mat.albedo_color * 0.5
+		_autobrake_button_mesh.material_override = mat
+	if _autobrake_button_label:
+		_autobrake_button_label.text = "A/BRK\nARMED" if armed else "A/BRK\nOFF"
+		_autobrake_button_label.modulate = Color(1.0, 0.8, 0.0) if armed else Color(0.5, 0.5, 0.5)
+		_autobrake_button_label.outline_modulate = Color(0.2, 0.1, 0) if armed else Color(0.1, 0.1, 0.1)

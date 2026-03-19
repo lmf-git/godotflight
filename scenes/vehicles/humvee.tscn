@@ -1,0 +1,65 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://scenes/vehicles/humvee.gd" id="1_script"]
+[ext_resource type="Script" path="res://scenes/vehicles/gun.gd" id="2_gun"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_body"]
+size = Vector3(2.1, 1.5, 4.5)
+
+[node name="Humvee" type="RigidBody3D"]
+collision_layer = 4
+collision_mask = 5
+mass = 2500.0
+script = ExtResource("1_script")
+
+[node name="CockpitCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.4, -1.2)
+fov = 80.0
+
+[node name="ThirdPersonCamera" type="Camera3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.97, 0.26, 0, -0.26, 0.97, 0, 5.0, 8.0)
+
+[node name="ExitPosition" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.5, 1.0, 0)
+
+[node name="DebugDraw" type="Node3D" parent="."]
+
+[node name="BodyCollision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.75, 0)
+shape = SubResource("BoxShape3D_body")
+
+[node name="Turret" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.45, -0.2)
+
+[node name="GunPivot" type="Node3D" parent="Turret"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.2, 0)
+
+[node name="MachineGun" type="Node3D" parent="Turret/GunPivot"]
+script = ExtResource("2_gun")
+
+[node name="MuzzlePoint" type="Marker3D" parent="Turret/GunPivot/MachineGun"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -1.8)
+
+[node name="SuspensionRayFL" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.95, 0.65, -1.4)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayFR" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.95, 0.65, -1.4)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayRL" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.95, 0.65, 1.4)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true
+
+[node name="SuspensionRayRR" type="RayCast3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.95, 0.65, 1.4)
+target_position = Vector3(0, -0.65, 0)
+collision_mask = 1
+exclude_parent = true

@@ -72,7 +72,11 @@ var ground_effect_factor: float = 0.0
 var gear_down := true
 var gear_position: float = 1.0
 var nosewheel_current_angle: float = 0.0
-var _last_damage_frame: int = -1
+var _last_damage_time: float = -1.0
+var _part_damage_time: Dictionary = {}
+const BODY_DAMAGE_COOLDOWN := 0.15
+const PART_DAMAGE_COOLDOWN := 0.3
+const PART_IMPACT_THRESHOLD := 6.0
 
 # Missiles
 var missiles: Array[Missile] = []
@@ -86,6 +90,18 @@ var hardpoint_positions: Array[Vector3] = [
 # Gun
 var gun: AircraftGun
 var gun_firing := false
+
+# Weapon system
+enum WeaponMode { GUNS, MISSILES, LASER, BOMBS }
+var current_weapon: WeaponMode = WeaponMode.MISSILES
+var bombs_remaining: int = 4
+var countermeasures: int = 30
+var laser_target: Node3D = null
+var laser_spot_pos: Vector3 = Vector3.ZERO
+var laser_spot_active := false
+var laser_camera_active := false
+var laser_camera_node: Camera3D = null   # direct child, belly-mounted FLIR
+var lock_progress: float = 0.0
 
 # Damage state
 var has_left_wing := true
@@ -149,6 +165,12 @@ func _ready() -> void:
 	gun.position = Vector3(0, -0.1, -10.5)  # Under nose
 	add_child(gun)
 
+	# Register as aircraft for HUD polling
+	add_to_group("aircraft")
+
+	# Set up laser/FLIR belly camera
+	_setup_laser_camera()
+
 	# Create afterburner particles
 	_create_afterburner()
 
@@ -166,24 +188,66 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_J:
 		_break_next_part()
 
-	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_BRACKETRIGHT:
+	# Flaps: scroll wheel (no modifier — Ctrl+scroll is eaten by macOS system zoom)
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			flaps_input = clamp(flaps_input + 0.25, 0.0, 1.0)
 			print("Flaps: %.0f%%" % (flaps_input * 100))
-		elif event.keycode == KEY_BRACKETLEFT:
+			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			flaps_input = clamp(flaps_input - 0.25, 0.0, 1.0)
 			print("Flaps: %.0f%%" % (flaps_input * 100))
-		elif event.keycode == KEY_F:
-			fire_missile()
-		elif event.keycode == KEY_G:
-			gun_firing = true
-		elif event.keycode == KEY_B:
-			afterburner_active = not afterburner_active
-			print("Afterburner: ", "ON" if afterburner_active else "OFF")
-	# Gun release
-	if event is InputEventKey and not event.pressed:
-		if event.keycode == KEY_G:
+			get_viewport().set_input_as_handled()
+
+	# Laser camera: Ctrl + Right-click → toggle sensor view
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT \
+			and event.pressed and event.ctrl_pressed:
+		if laser_camera_active:
+			_deactivate_laser_view()
+		else:
+			_activate_laser_view()
+		get_viewport().set_input_as_handled()
+
+	# Left-click fires current weapon (all views)
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT \
+			and not event.alt_pressed:
+		if event.pressed:
+			var _cockpit := get_node_or_null("Cockpit")
+			if _cockpit and _cockpit.handle_cockpit_click():
+				get_viewport().set_input_as_handled()
+				return
+			match current_weapon:
+				WeaponMode.MISSILES:
+					if lock_progress >= 1.0:
+						fire_missile()
+					else:
+						print("Not locked! (%.0f%%)" % (lock_progress * 100))
+				WeaponMode.BOMBS:
+					_drop_bomb()
+				WeaponMode.LASER:
+					_laser_designate()
+				WeaponMode.GUNS:
+					gun_firing = true
+		else:
 			gun_firing = false
+		get_viewport().set_input_as_handled()
+
+	if event is InputEventKey and event.pressed and not event.is_echo():
+		match event.keycode:
+			KEY_F:
+				_cycle_weapon()
+			KEY_R:
+				_cycle_target()
+			KEY_T:
+				if event.alt_pressed:
+					_lock_nearest_target()
+				else:
+					_laser_designate()
+			KEY_B:
+				afterburner_active = not afterburner_active
+				print("Afterburner: ", "ON" if afterburner_active else "OFF")
+			KEY_C:
+				_deploy_countermeasures()
 
 func _physics_process(delta: float) -> void:
 	_update_wheel_colliders()
@@ -191,6 +255,20 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	super._process(delta)
+
+	# Progressive lock-on
+	if laser_target and is_instance_valid(laser_target):
+		var to_tgt := (laser_target.global_position - global_position).normalized()
+		var in_cone := (-global_transform.basis.z).dot(to_tgt) > 0.5
+		var in_range := global_position.distance_to(laser_target.global_position) < 15000.0
+		if in_cone and in_range:
+			lock_progress = minf(lock_progress + 0.18 * delta, 1.0)
+		else:
+			lock_progress = maxf(lock_progress - 0.5 * delta, 0.0)
+	else:
+		laser_target = null
+		lock_progress = maxf(lock_progress - 0.5 * delta, 0.0)
+
 	# Animate exhaust glow based on throttle
 	if exhaust:
 		var exhaust_mat: StandardMaterial3D = exhaust.get_surface_override_material(0)
@@ -289,6 +367,12 @@ func _process_inputs(delta: float) -> void:
 	input_yaw = rudder_input
 
 func _apply_flight_physics(delta: float) -> void:
+	if not has_left_wing and not has_right_wing \
+			and not has_horizontal_tail and not has_vertical_tail:
+		# Still damp rotation so the fuselage tumbles realistically; leave linear alone
+		apply_torque(-angular_velocity * angular_damping * mass)
+		return
+
 	clear_debug_forces()
 
 	var forward := -global_transform.basis.z
@@ -304,8 +388,7 @@ func _apply_flight_physics(delta: float) -> void:
 	var dynamic_pressure: float = 0.5 * AIR_DENSITY * airspeed * airspeed
 	var lift_magnitude: float = dynamic_pressure * wing_area * current_cl
 
-	var wing_factor: float = _get_wing_factor()
-	lift_magnitude *= wing_factor
+	var wing_factor: float = _get_wing_factor()  # used for aileron effectiveness only
 
 	ground_effect_factor = _calculate_ground_effect()
 	lift_magnitude *= (1.0 + ground_effect_factor)
@@ -317,15 +400,21 @@ func _apply_flight_physics(delta: float) -> void:
 		if lift_direction.dot(up) < 0:
 			lift_direction = -lift_direction
 
-	var lift_force: Vector3 = lift_direction * lift_magnitude
-	apply_central_force(lift_force)
-	add_debug_force("lift", lift_force, Color.RED)
+	# Per-wing lift: each intact wing contributes half of total lift
+	const FLAPERON_CL: float = 0.06
+	var lift_left: float = lift_magnitude * 0.5 * (1.0 - aileron_input * FLAPERON_CL) if has_left_wing else 0.0
+	var lift_right: float = lift_magnitude * 0.5 * (1.0 + aileron_input * FLAPERON_CL) if has_right_wing else 0.0
+	apply_central_force(lift_direction * (lift_left + lift_right))
+	add_debug_force("lift_l", lift_direction * lift_left, Color(1.0, 0.2, 0.2))
+	add_debug_force("lift_r", lift_direction * lift_right, Color(1.0, 0.55, 0.1))
 
-	# Asymmetric wing damage
-	var roll_asymmetry: float = _get_roll_asymmetry()
-	if absf(roll_asymmetry) > 0.01 and airspeed > 5.0:
-		apply_torque(forward * roll_asymmetry * lift_magnitude * 0.8)
-		apply_torque(up * roll_asymmetry * dynamic_pressure * 50.0)
+	# Roll torque from asymmetry: -Z torque with positive net_asymmetry (right dominant) → bank right
+	var half_span: float = wing_span * 0.25
+	if has_left_wing != has_right_wing and airspeed > 5.0:
+		var net_asymmetry: float = lift_right - lift_left
+		apply_torque(-global_transform.basis.z * net_asymmetry * half_span)
+		var yaw_sign := 1.0 if has_right_wing else -1.0
+		apply_torque(up * yaw_sign * dynamic_pressure * 50.0)
 
 	if ground_effect_factor > 0.01:
 		add_debug_force("ground_fx", Vector3.UP * ground_effect_factor * 10000, Color.CYAN)
@@ -334,6 +423,9 @@ func _apply_flight_physics(delta: float) -> void:
 	var induced_drag_coef: float = (current_cl * current_cl) / (PI * oswald_efficiency * aspect_ratio)
 	current_cd = cd_0 + induced_drag_coef
 	current_cd += flaps_input * flaps_cd_penalty
+	# Landing gear drag
+	if gear_down and gear_position > 0.5:
+		current_cd += 0.12 * gear_position
 
 	# High AoA form drag - wing presents more cross-section to airflow
 	var aoa_rad_abs := deg_to_rad(absf(angle_of_attack))
@@ -428,26 +520,35 @@ func _calculate_lift_coefficient(aoa: float) -> float:
 	return stall_cl * dropoff
 
 func _apply_stability(_delta: float, up: Vector3, forward: Vector3, right: Vector3) -> void:
-	if has_vertical_tail:
-		var local_vel: Vector3 = get_local_velocity()
-		if local_vel.length() > 5.0:
-			var sideslip: float = atan2(local_vel.x, -local_vel.z)
-			apply_torque(-up * sideslip * yaw_stability * mass)
+	# Back off pitch/roll stability when actively maneuvering — prevents fighting aerobatics
+	var ang_rate: float = angular_velocity.length()
+	var maneuver_scale: float = clampf(1.0 - ang_rate / 1.2, 0.0, 1.0)
 
-	if has_horizontal_tail:
-		var forward_horizontal: Vector3 = Vector3(forward.x, 0, forward.z).normalized()
-		var pitch_angle: float = forward.angle_to(forward_horizontal) if forward_horizontal.length() > 0.01 else 0.0
-		if forward.y < 0:
-			pitch_angle = -pitch_angle
-		# Only apply when controls centered AND not in a sustained maneuver
-		if absf(elevator_input) < 0.1 and absf(angular_velocity.dot(right)) < 0.3:
-			var pitch_factor := clampf(1.0 - absf(pitch_angle) / 1.0, 0.0, 1.0)
-			apply_torque(right * (-pitch_angle * pitch_stability * mass * 0.05 * pitch_factor))
+	# Tails provide full stability; fuselage/CG provides 20% residual when tail is gone
+	var vtail_factor: float = 1.0 if has_vertical_tail else 0.2
+	var htail_factor: float = 1.0 if has_horizontal_tail else 0.2
+
+	# Weathervane stability — suppressed only while rudder is actively pressed
+	var local_vel: Vector3 = get_local_velocity()
+	if local_vel.length() > 5.0:
+		var sideslip: float = atan2(local_vel.x, -local_vel.z)
+		var yaw_scale := clampf(1.0 - absf(rudder_input) / 0.15, 0.0, 1.0)
+		apply_torque(-up * sideslip * yaw_stability * mass * yaw_scale * vtail_factor)
+
+	var forward_horizontal: Vector3 = Vector3(forward.x, 0, forward.z).normalized()
+	var pitch_angle: float = forward.angle_to(forward_horizontal) if forward_horizontal.length() > 0.01 else 0.0
+	if forward.y < 0:
+		pitch_angle = -pitch_angle
+	if absf(elevator_input) < 0.1 and absf(angular_velocity.dot(right)) < 0.3:
+		var pitch_factor := clampf(1.0 - absf(pitch_angle) / 1.0, 0.0, 1.0)
+		apply_torque(right * (-pitch_angle * pitch_stability * mass * 0.05 * pitch_factor * maneuver_scale * htail_factor))
 
 	var wing_factor: float = _get_wing_factor()
-	var roll_angle: float = up.signed_angle_to(Vector3.UP, forward)
+	var roll_rate: float = absf(angular_velocity.dot(forward))
+	var roll_damp: float = clampf(1.0 - roll_rate / 0.8, 0.0, 1.0)
 	if absf(aileron_input) < 0.1:
-		apply_torque(forward * (-roll_angle * roll_stability * mass * 0.05 * wing_factor))
+		var roll_angle: float = up.signed_angle_to(Vector3.UP, forward)
+		apply_torque(forward * (-roll_angle * roll_stability * mass * 0.05 * wing_factor * roll_damp))
 
 func _calculate_ground_effect() -> float:
 	if altitude_agl > ground_effect_height:
@@ -474,7 +575,7 @@ func _apply_ground_forces(_delta: float) -> void:
 	if linear_velocity.y > 1.5:
 		return
 
-	var forward := -global_transform.basis.z
+	var fwd := -global_transform.basis.z
 	var right := global_transform.basis.x
 	var max_grip_per_wheel: float = mass * 9.81 * 0.8 / 3.0
 
@@ -496,9 +597,9 @@ func _apply_ground_forces(_delta: float) -> void:
 			apply_force(friction_vec, force_pos)
 
 	if throttle < 0.01 and airspeed > 0.5:
-		var forward_speed: float = linear_velocity.dot(forward)
+		var forward_speed: float = linear_velocity.dot(fwd)
 		var brake_magnitude: float = brake_force * clamp(absf(forward_speed) / 5.0, 0.0, 1.0)
-		var brake_vector: Vector3 = -forward * sign(forward_speed) * brake_magnitude
+		var brake_vector: Vector3 = -fwd * sign(forward_speed) * brake_magnitude
 		apply_central_force(brake_vector)
 
 func _on_debug_toggled() -> void:
@@ -508,10 +609,12 @@ func _on_debug_toggled() -> void:
 func _animate_control_surfaces() -> void:
 	var max_deflection: float = deg_to_rad(25.0)
 
+	# Flaperons: droop symmetrically with flap input, asymmetrically for roll
+	var flaperon_droop: float = flaps_input * deg_to_rad(15.0)
 	if left_aileron:
-		left_aileron.rotation.x = -aileron_input * max_deflection
+		left_aileron.rotation.x = (-aileron_input * max_deflection) + flaperon_droop
 	if right_aileron:
-		right_aileron.rotation.x = aileron_input * max_deflection
+		right_aileron.rotation.x = (aileron_input * max_deflection) + flaperon_droop
 
 	var elevator_angle: float = elevator_input * max_deflection
 	if left_elevator:
@@ -604,9 +707,7 @@ func _get_roll_asymmetry() -> float:
 	return 0.0
 
 func _on_body_shape_entered(_body_rid: RID, body: Node, _body_shape_index: int, local_shape_index: int) -> void:
-	var current_frame := Engine.get_physics_frames()
-	if current_frame == _last_damage_frame:
-		return
+	var now := Time.get_ticks_msec() / 1000.0
 
 	var owner_id := shape_find_owner(local_shape_index)
 	var shape_node: Node = shape_owner_get_owner(owner_id)
@@ -615,7 +716,6 @@ func _on_body_shape_entered(_body_rid: RID, body: Node, _body_shape_index: int, 
 	if shape_node == front_wheel_col or shape_node == left_wheel_col or shape_node == right_wheel_col:
 		var sink_rate: float = absf(linear_velocity.y)
 		if sink_rate > gear_break_speed:
-			_last_damage_frame = current_frame
 			print("Hard landing at %.1f m/s sink rate!" % sink_rate)
 			if shape_node == front_wheel_col:
 				_break_gear("front")
@@ -625,13 +725,40 @@ func _on_body_shape_entered(_body_rid: RID, body: Node, _body_shape_index: int, 
 				_break_gear("right")
 		return
 
+	# Part colliders — per-shape cooldown, full velocity, low threshold
+	var is_part := shape_node == left_wing_collider or shape_node == right_wing_collider \
+		or shape_node == htail_collider or shape_node == vtail_collider
+	if is_part:
+		var last_hit: float = _part_damage_time.get(shape_node, -1.0)
+		if now - last_hit < PART_DAMAGE_COOLDOWN:
+			return
+		var rel_speed := linear_velocity.length()
+		if body is RigidBody3D:
+			rel_speed = (linear_velocity - body.linear_velocity).length()
+		if rel_speed < PART_IMPACT_THRESHOLD:
+			return
+		_part_damage_time[shape_node] = now
+		print("Part hit: %s at %.1f m/s" % [shape_node.name, rel_speed])
+		if shape_node == left_wing_collider and has_left_wing:
+			_destroy_left_wing()
+		elif shape_node == right_wing_collider and has_right_wing:
+			_destroy_right_wing()
+		elif shape_node == htail_collider and has_horizontal_tail:
+			_destroy_horizontal_tail()
+		elif shape_node == vtail_collider and has_vertical_tail:
+			_destroy_vertical_tail()
+		return
+
+	# Body collision — global cooldown
+	if now - _last_damage_time < BODY_DAMAGE_COOLDOWN:
+		return
+
 	var impact_speed: float
 	if body is StaticBody3D:
 		if altitude_agl > 5.0:
 			impact_speed = linear_velocity.length()
 		else:
 			impact_speed = maxf(absf(linear_velocity.y), linear_velocity.length() * 0.4)
-		# Landing gear absorbs impact when deployed
 		if gear_down and gear_position > 0.85:
 			impact_speed = maxf(0.0, impact_speed - 6.0)
 	else:
@@ -643,26 +770,10 @@ func _on_body_shape_entered(_body_rid: RID, body: Node, _body_shape_index: int, 
 	if impact_speed <= impact_damage_threshold:
 		return
 
-	_last_damage_frame = current_frame
+	_last_damage_time = now
 	print("Collision with %s at %.1f m/s impact" % [body.name, impact_speed])
 
-	var hit_specific := false
-	if shape_node == left_wing_collider and has_left_wing:
-		_destroy_left_wing()
-		hit_specific = true
-	elif shape_node == right_wing_collider and has_right_wing:
-		_destroy_right_wing()
-		hit_specific = true
-	elif shape_node == htail_collider and has_horizontal_tail:
-		_destroy_horizontal_tail()
-		hit_specific = true
-	elif shape_node == vtail_collider and has_vertical_tail:
-		_destroy_vertical_tail()
-		hit_specific = true
-
-	var extra_rolls := 0
-	if not hit_specific:
-		extra_rolls = 1
+	var extra_rolls := 1
 	if impact_speed > impact_damage_threshold * 2:
 		extra_rolls += 1
 	if impact_speed > impact_damage_threshold * 3:
@@ -670,6 +781,9 @@ func _on_body_shape_entered(_body_rid: RID, body: Node, _body_shape_index: int, 
 
 	for i in extra_rolls:
 		_apply_random_damage()
+
+func take_hit(_blast_pos: Vector3 = Vector3.ZERO) -> void:
+	_apply_random_damage()
 
 func _apply_random_damage() -> void:
 	var intact: Array[String] = []
@@ -698,6 +812,10 @@ func _destroy_left_wing() -> void:
 		return
 	has_left_wing = false
 	if left_wing_mesh:
+		for m in missiles:
+			if is_instance_valid(m) and m.get_parent() == left_wing_mesh \
+					and m.state == Missile.State.ATTACHED:
+				m.visible = false
 		spawn_debris(left_wing_mesh, 120.0)
 		left_wing_mesh = null
 	if left_wing_collider:
@@ -715,6 +833,10 @@ func _destroy_right_wing() -> void:
 		return
 	has_right_wing = false
 	if right_wing_mesh:
+		for m in missiles:
+			if is_instance_valid(m) and m.get_parent() == right_wing_mesh \
+					and m.state == Missile.State.ATTACHED:
+				m.visible = false
 		spawn_debris(right_wing_mesh, 120.0)
 		right_wing_mesh = null
 	if right_wing_collider:
@@ -777,9 +899,19 @@ func _break_gear(which: String) -> void:
 func _spawn_missiles() -> void:
 	for i in hardpoint_positions.size():
 		var missile: Missile = MISSILE_SCENE.instantiate()
-		missile.position = hardpoint_positions[i]
+		var hp: Vector3 = hardpoint_positions[i]
 		missile.state = Missile.State.ATTACHED
-		add_child(missile)
+		if hp.x <= 0.0 and left_wing_mesh:
+			missile.position = left_wing_mesh.to_local(to_global(hp))
+			missile.set_meta("wing_side", "left")
+			left_wing_mesh.add_child(missile)
+		elif hp.x > 0.0 and right_wing_mesh:
+			missile.position = right_wing_mesh.to_local(to_global(hp))
+			missile.set_meta("wing_side", "right")
+			right_wing_mesh.add_child(missile)
+		else:
+			missile.position = hp
+			add_child(missile)
 		missiles.append(missile)
 
 func fire_missile() -> void:
@@ -798,20 +930,232 @@ func fire_missile() -> void:
 		if not is_instance_valid(missile) or missile.state != Missile.State.ATTACHED:
 			continue
 
-		if missile.position.x < 0 and not has_left_wing:
+		var wing_side: String = missile.get_meta("wing_side", "")
+		if wing_side == "left" and not has_left_wing:
 			continue
-		if missile.position.x > 0 and not has_right_wing:
+		if wing_side == "right" and not has_right_wing:
 			continue
 
 		var global_pos := missile.global_position
 		var global_rot := missile.global_transform.basis
-		remove_child(missile)
+		missile.get_parent().remove_child(missile)
 		get_tree().current_scene.add_child(missile)
 		missile.global_position = global_pos
 		missile.global_transform.basis = global_rot
 
-		missile.launch(linear_velocity, self)
+		# Eject downward from the wing before ignition
+		var eject_vel := linear_velocity - global_transform.basis.y * 8.0
+		missile.launch(eject_vel, self)
+		if laser_target and is_instance_valid(laser_target):
+			missile.homing_target = laser_target
 		print("Missile fired!")
 		return
 
 	print("No missiles available!")
+
+# === WEAPON SYSTEM ===
+
+func _setup_laser_camera() -> void:
+	laser_camera_node = Camera3D.new()
+	laser_camera_node.name = "LaserCamera"
+	laser_camera_node.position = Vector3(0, -4.0, 0)
+	laser_camera_node.rotation_degrees = Vector3(-90, 0, 0)  # -90 = look down (-Y)
+	laser_camera_node.near = 0.5
+	laser_camera_node.fov = 25.0
+	laser_camera_node.far = 20000.0
+	laser_camera_node.current = false
+	add_child(laser_camera_node)
+
+func _activate_laser_view() -> void:
+	laser_camera_active = true
+	if cockpit_camera:
+		cockpit_camera.current = false
+	if third_person_camera:
+		third_person_camera.current = false
+	if laser_camera_node:
+		laser_camera_node.current = true
+
+func _deactivate_laser_view() -> void:
+	laser_camera_active = false
+	if laser_camera_node:
+		laser_camera_node.current = false
+	_update_active_camera()
+
+func _cycle_weapon() -> void:
+	current_weapon = ((current_weapon as int) + 1) % 4 as WeaponMode
+	var names := ["GUNS", "MISSILES", "LASER", "BOMBS"]
+	print("Weapon: " + names[current_weapon as int])
+
+func _drop_bomb() -> void:
+	if bombs_remaining <= 0:
+		print("No bombs remaining!")
+		return
+	bombs_remaining -= 1
+
+	var bomb := RigidBody3D.new()
+	bomb.mass = 50.0
+	bomb.gravity_scale = 1.0
+	bomb.collision_layer = 8
+	bomb.collision_mask = 5
+	bomb.contact_monitor = true
+	bomb.max_contacts_reported = 1
+
+	var mesh_inst := MeshInstance3D.new()
+	var sphere_mesh := SphereMesh.new()
+	sphere_mesh.radius = 0.25
+	sphere_mesh.height = 0.8
+	mesh_inst.mesh = sphere_mesh
+	var bmat := StandardMaterial3D.new()
+	bmat.albedo_color = Color(0.15, 0.15, 0.15)
+	mesh_inst.material_override = bmat
+	bomb.add_child(mesh_inst)
+
+	var col := CollisionShape3D.new()
+	var bshape := SphereShape3D.new()
+	bshape.radius = 0.25
+	col.shape = bshape
+	bomb.add_child(col)
+
+	get_tree().current_scene.add_child(bomb)
+	bomb.global_position = global_position + Vector3(0, -0.8, 0)
+	bomb.linear_velocity = linear_velocity
+	bomb.body_entered.connect(_on_bomb_hit.bind(bomb))
+	print("Bomb dropped!")
+
+func _on_bomb_hit(_body: Node, bomb: RigidBody3D) -> void:
+	if not is_instance_valid(bomb):
+		return
+	var boom_pos := bomb.global_position
+	bomb.queue_free()
+	_spawn_explosion(boom_pos, 8.0, 30.0)
+
+func _spawn_explosion(pos: Vector3, radius: float, light_range: float) -> void:
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.5, 0.1, 1.0)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.4, 0.05)
+	mat.emission_energy_multiplier = 6.0
+
+	var sphere := SphereMesh.new()
+	sphere.radius = radius * 0.1
+	sphere.height = radius * 0.2
+	var exp_mesh := MeshInstance3D.new()
+	exp_mesh.mesh = sphere
+	exp_mesh.material_override = mat
+	get_tree().current_scene.add_child(exp_mesh)
+	exp_mesh.global_position = pos
+
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.6, 0.2)
+	light.light_energy = 12.0
+	light.omni_range = light_range
+	get_tree().current_scene.add_child(light)
+	light.global_position = pos
+
+	var tw := get_tree().create_tween()
+	tw.tween_property(exp_mesh, "scale", Vector3(radius, radius, radius), 0.7)
+	tw.tween_callback(func(): exp_mesh.queue_free(); light.queue_free())
+
+func _cycle_target() -> void:
+	var ai_planes: Array = get_tree().get_nodes_in_group("ai_aircraft")
+	ai_planes = ai_planes.filter(func(n): return is_instance_valid(n))
+	if ai_planes.is_empty():
+		laser_target = null
+		return
+	if not laser_target or not is_instance_valid(laser_target):
+		laser_target = ai_planes[0]
+	else:
+		var idx: int = ai_planes.find(laser_target)
+		laser_target = ai_planes[(idx + 1) % ai_planes.size()]
+	print("Target: " + laser_target.name)
+
+func _laser_designate() -> void:
+	var cam := get_viewport().get_camera_3d()
+	if not cam:
+		return
+	var space := get_world_3d().direct_space_state
+	var cam_fwd := -cam.global_transform.basis.z
+	var query := PhysicsRayQueryParameters3D.create(
+		cam.global_position,
+		cam.global_position + cam_fwd * 20000.0,
+		1
+	)
+	query.exclude = [get_rid()]
+	var result := space.intersect_ray(query)
+	if result:
+		laser_spot_pos = result.position
+		laser_spot_active = true
+		print("Laser spot: ", laser_spot_pos)
+	else:
+		laser_spot_active = false
+
+func _lock_nearest_target() -> void:
+	var best_dist := 15000.0
+	var best: Node3D = null
+	for node in get_tree().get_nodes_in_group("ai_aircraft"):
+		if not is_instance_valid(node):
+			continue
+		var d := global_position.distance_to(node.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = node
+	if best:
+		laser_target = best
+		print("Locked: %s at %.0fm" % [best.name, best_dist])
+	else:
+		laser_target = null
+		print("No target in range")
+
+func _deploy_countermeasures() -> void:
+	if countermeasures <= 0:
+		print("No countermeasures remaining!")
+		return
+	countermeasures -= 1
+	_spawn_flare()
+	_spawn_flare()
+	print("Countermeasures: %d remaining" % countermeasures)
+
+func _spawn_flare() -> void:
+	var flare := RigidBody3D.new()
+	flare.mass = 0.2
+	flare.gravity_scale = 1.0
+	flare.collision_layer = 0
+	flare.collision_mask = 1  # World layer so flares land on terrain
+	flare.continuous_cd = true  # prevent tunnelling through trimesh terrain at speed
+	var col := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = Vector3(0.2, 0.2, 0.2)
+	col.shape = box
+	flare.add_child(col)
+	var mi := MeshInstance3D.new()
+	var sm := SphereMesh.new()
+	sm.radius = 0.15
+	sm.height = 0.3
+	mi.mesh = sm
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.85, 0.3)
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.8, 0.2)
+	mat.emission_energy_multiplier = 8.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	flare.add_child(mi)
+	var light := OmniLight3D.new()
+	light.light_color = Color(1.0, 0.85, 0.3)
+	light.light_energy = 8.0
+	light.omni_range = 60.0
+	flare.add_child(light)
+	flare.add_to_group("flares")
+	get_tree().current_scene.add_child(flare)
+	var side := global_transform.basis.x * (1.0 if randf() > 0.5 else -1.0)
+	var backward := global_transform.basis.z  # +Z is rearward in Godot
+	flare.global_position = global_position + side * 2.0 + backward * 2.0
+	flare.linear_velocity = linear_velocity + side * 40.0 + backward * 30.0 + Vector3.DOWN * 15.0
+	var tw := flare.create_tween()
+	tw.tween_interval(2.5)
+	tw.tween_method(func(e: float): mat.emission_energy_multiplier = e; light.light_energy = e,
+		8.0, 0.0, 1.5)
+	tw.tween_callback(flare.queue_free)

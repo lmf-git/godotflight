@@ -38,11 +38,30 @@ var freelook_pitch: float = 0.0
 var _alt_was_pressed := false
 var _alt_last_press_time: float = 0.0
 var _tp_default_pos: Vector3
+var _hint_label: Label
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	if third_person_camera:
 		_tp_default_pos = third_person_camera.position
+
+	# Entry hint label — shown when approaching a multi-seat vehicle
+	var hint_canvas := CanvasLayer.new()
+	add_child(hint_canvas)
+	_hint_label = Label.new()
+	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint_label.add_theme_color_override("font_color", Color(1.0, 0.95, 0.3))
+	_hint_label.add_theme_font_size_override("font_size", 28)
+	_hint_label.anchor_left = 0.5
+	_hint_label.anchor_right = 0.5
+	_hint_label.anchor_top = 0.5
+	_hint_label.anchor_bottom = 0.5
+	_hint_label.offset_left = -150
+	_hint_label.offset_right = 150
+	_hint_label.offset_top = 40
+	_hint_label.offset_bottom = 75
+	_hint_label.visible = false
+	hint_canvas.add_child(_hint_label)
 
 func _unhandled_input(event: InputEvent) -> void:
 	# Escape to release mouse - always works
@@ -87,12 +106,27 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _process(delta: float) -> void:
 	if is_in_vehicle:
+		if _hint_label:
+			_hint_label.visible = false
 		return
 
 	# Return freelook to center when Alt released and not locked
 	if not freelook_active and not freelook_locked:
 		freelook_yaw = move_toward(freelook_yaw, 0.0, FREELOOK_RETURN_SPEED * delta)
 		freelook_pitch = move_toward(freelook_pitch, 0.0, FREELOOK_RETURN_SPEED * delta)
+
+	# Entry hint: show role when near an unoccupied vehicle
+	if _hint_label:
+		var nearby: Vehicle = _find_nearby_vehicle()
+		if nearby and not nearby.is_occupied:
+			var hint: String = nearby.get_entry_hint(global_position)
+			if hint != "":
+				_hint_label.text = "[U]  " + hint
+				_hint_label.visible = true
+			else:
+				_hint_label.visible = false
+		else:
+			_hint_label.visible = false
 
 	# Apply base pitch + freelook offset to cameras
 	camera.rotation = Vector3(_base_pitch + freelook_pitch, freelook_yaw, 0.0)
