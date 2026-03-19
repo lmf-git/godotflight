@@ -23,7 +23,7 @@ class_name FixedWing
 @export_group("Control Surfaces")
 @export var elevator_authority: float = 26000.0  # Pitch torque
 @export var aileron_authority: float = 9000.0    # Roll torque
-@export var rudder_authority: float = 3000.0     # Yaw torque
+@export var rudder_authority: float = 7000.0     # Yaw torque
 
 # Engine
 @export_group("Engine")
@@ -691,7 +691,7 @@ func _animate_control_surfaces() -> void:
 
 	# Rudder - yaw control
 	if rudder:
-		rudder.rotation.y = rudder_input * max_deflection
+		rudder.rotation.y = rudder_input * deg_to_rad(40.0)
 
 	# Flaps - deploy based on flaps setting
 	var flap_angle: float = flaps_input * deg_to_rad(40.0)  # 40 degrees max

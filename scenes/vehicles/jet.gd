@@ -22,7 +22,7 @@ class_name Jet
 @export_group("Control Surfaces")
 @export var elevator_authority: float = 22000.0   # Higher for jet
 @export var aileron_authority: float = 14000.0
-@export var rudder_authority: float = 4000.0
+@export var rudder_authority: float = 9000.0
 
 # Engine
 @export_group("Engine")
@@ -635,7 +635,7 @@ func _animate_control_surfaces() -> void:
 		right_elevator.rotation.x = elevator_angle
 
 	if rudder_mesh:
-		rudder_mesh.rotation.y = rudder_input * max_deflection
+		rudder_mesh.rotation.y = rudder_input * deg_to_rad(40.0)
 
 func _create_afterburner() -> void:
 	afterburner_particles = GPUParticles3D.new()
