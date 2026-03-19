@@ -591,7 +591,7 @@ func _apply_ground_forces(_delta: float) -> void:
 		var lat_dir: Vector3 = wheel_laterals[i]
 		var lat_speed: float = lat_dir.dot(linear_velocity)
 		if absf(lat_speed) > 0.05:
-			var grip_force: float = minf(absf(lat_speed) * mass * 2.0 / 3.0, max_grip_per_wheel)
+			var grip_force: float = minf(absf(lat_speed) * mass * 20.0, max_grip_per_wheel)
 			var friction_vec: Vector3 = -lat_dir * sign(lat_speed) * grip_force
 			var force_pos: Vector3 = col.global_position - global_position
 			apply_force(friction_vec, force_pos)

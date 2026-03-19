@@ -21,6 +21,7 @@ var _missile_warning: Control
 var _gun_sight: Control
 var _hit_indicator: Control
 var _hit_sound: AudioStreamPlayer
+var _waypoint_hud: Control
 
 func _ready() -> void:
 	_build_ui()
@@ -274,6 +275,12 @@ func _build_ui() -> void:
 	_missile_warning.visible = false
 	add_child(_missile_warning)
 
+	# Waypoint indicator — always-on when an objective marker is set
+	_waypoint_hud = _WaypointIndicator.new()
+	_waypoint_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_waypoint_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_waypoint_hud)
+
 	get_viewport().size_changed.connect(_on_viewport_resized)
 	_on_viewport_resized()
 
@@ -443,6 +450,24 @@ class _RadarScope extends Control:
 			draw_line(dp + Vector2(d, 0),  dp + Vector2(0, d), Color(0.3, 0.8, 1.0), 2.0)
 			draw_line(dp + Vector2(0, d),  dp + Vector2(-d, 0), Color(0.3, 0.8, 1.0), 2.0)
 			draw_line(dp + Vector2(-d, 0), dp + Vector2(0, -d), Color(0.3, 0.8, 1.0), 2.0)
+
+		# Objective markers — yellow squares
+		for map_node in tree.get_nodes_in_group("map_overlay"):
+			if not ("_objective_markers" in map_node):
+				break
+			for marker: Vector2 in map_node._objective_markers:
+				var mdelta := Vector3(marker.x - player_pos.x, 0.0, marker.y - player_pos.z)
+				var mrdx: float = mdelta.x * cos_h + mdelta.z * sin_h
+				var mrdz: float = -mdelta.x * sin_h + mdelta.z * cos_h
+				var mbx: float = cx + (mrdx / RADAR_RANGE) * r
+				var mby: float = cy + (mrdz / RADAR_RANGE) * r
+				mbx = clamp(mbx, cx - r + 4, cx + r - 4)
+				mby = clamp(mby, cy - r + 4, cy + r - 4)
+				var oc := Color(1.0, 0.85, 0.0)
+				var ts := 5.0
+				draw_rect(Rect2(mbx - ts, mby - ts, ts * 2.0, ts * 2.0), oc, false, 2.0)
+				draw_line(Vector2(mbx, mby - ts - 5), Vector2(mbx, mby - ts), oc, 2.0)
+			break
 
 
 class _SensorOverlay extends Control:
@@ -742,3 +767,91 @@ class _GunSight extends Control:
 		var ds := "%.0fm" % dist if dist < 1000.0 else "%.1fkm" % (dist / 1000.0)
 		draw_string(font, pos + Vector2(r + 4, 5), ds,
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col)
+
+
+class _WaypointIndicator extends Control:
+	func _process(_delta: float) -> void:
+		var tree := Engine.get_main_loop() as SceneTree
+		if not tree:
+			return
+		visible = not tree.get_nodes_in_group("objective_markers").is_empty()
+		if visible:
+			queue_redraw()
+
+	func _draw() -> void:
+		var tree := Engine.get_main_loop() as SceneTree
+		if not tree:
+			return
+		var markers := tree.get_nodes_in_group("objective_markers")
+		if markers.is_empty():
+			return
+		var beacon := markers[0] as Node3D
+		if not is_instance_valid(beacon):
+			return
+		var cam := get_viewport().get_camera_3d()
+		if not cam:
+			return
+
+		var vehicle_pos := Vector3.ZERO
+		for node in tree.get_nodes_in_group("aircraft"):
+			if "is_occupied" in node and node.is_occupied:
+				vehicle_pos = node.global_position
+				break
+
+		# Use midpoint of beacon for screen projection
+		var target_pos: Vector3 = beacon.global_position + Vector3(0, 150.0, 0)
+		var dist_m: float = vehicle_pos.distance_to(beacon.global_position)
+		var dist_str: String = "%.0fm" % dist_m if dist_m < 1000.0 else "%.1fkm" % (dist_m / 1000.0)
+
+		var cx := size.x * 0.5
+		var cy := size.y * 0.5
+		var margin := 70.0
+		var font := ThemeDB.fallback_font
+		var oc := Color(1.0, 0.85, 0.0)
+
+		var cam_fwd: Vector3 = -cam.global_transform.basis.z
+		var to_target: Vector3 = (target_pos - cam.global_position).normalized()
+		var in_front := cam_fwd.dot(to_target) > 0.05
+
+		if in_front and cam.is_position_in_frustum(target_pos):
+			# On-screen diamond indicator
+			var sp := cam.unproject_position(target_pos)
+			var d := 14.0
+			draw_line(sp + Vector2(0, -d), sp + Vector2(d, 0), oc, 2.0)
+			draw_line(sp + Vector2(d, 0),  sp + Vector2(0, d),  oc, 2.0)
+			draw_line(sp + Vector2(0, d),  sp + Vector2(-d, 0), oc, 2.0)
+			draw_line(sp + Vector2(-d, 0), sp + Vector2(0, -d), oc, 2.0)
+			draw_string(font, sp + Vector2(-28, d + 16), "OBJ  " + dist_str,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 14, oc)
+		else:
+			# Off-screen: draw arrow at screen edge
+			var sp := cam.unproject_position(target_pos)
+			var screen_dir := (sp - Vector2(cx, cy))
+			if not in_front:
+				screen_dir = -screen_dir
+			if screen_dir.length() < 1.0:
+				screen_dir = Vector2(0, -1)
+			screen_dir = screen_dir.normalized()
+			var edge := _edge_pos(screen_dir, cx, cy, margin)
+			var as_ := 12.0
+			var perp := Vector2(-screen_dir.y, screen_dir.x)
+			draw_colored_polygon([
+				edge + screen_dir * as_,
+				edge - screen_dir * 4.0 + perp * as_ * 0.5,
+				edge - screen_dir * 4.0 - perp * as_ * 0.5,
+			], oc)
+			draw_string(font, edge + screen_dir * (as_ + 6) + Vector2(-24, 6),
+					dist_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, oc)
+
+	func _edge_pos(dir: Vector2, cx: float, cy: float, margin: float) -> Vector2:
+		var w := cx - margin
+		var h := cy - margin
+		if abs(dir.x) < 0.001:
+			return Vector2(cx, cy + sign(dir.y) * h)
+		if abs(dir.y) < 0.001:
+			return Vector2(cx + sign(dir.x) * w, cy)
+		var tx: float = w / abs(dir.x)
+		var ty: float = h / abs(dir.y)
+		if tx < ty:
+			return Vector2(cx + sign(dir.x) * w, cy + dir.y * tx)
+		return Vector2(cx + dir.x * ty, cy + sign(dir.y) * h)

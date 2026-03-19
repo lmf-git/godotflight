@@ -52,6 +52,7 @@ var is_stalled := false
 var current_cl: float = 0.0
 var current_cd: float = 0.0
 var ground_effect_factor: float = 0.0
+var speedbrake_active := false
 var gear_down := true
 var gear_position: float = 1.0      # 0 = retracted, 1 = extended
 var nosewheel_current_angle: float = 0.0  # Current smoothed steering angle (radians)
@@ -146,6 +147,8 @@ const AIR_DENSITY: float = 1.225  # kg/m³
 @onready var right_aileron: MeshInstance3D = $RightWing/RightAileron
 @onready var left_flap: MeshInstance3D = $LeftWing/LeftFlap
 @onready var right_flap: MeshInstance3D = $RightWing/RightFlap
+@onready var left_speedbrake: MeshInstance3D = $LeftWing/LeftSpeedbrake
+@onready var right_speedbrake: MeshInstance3D = $RightWing/RightSpeedbrake
 @onready var left_elevator: MeshInstance3D = $HorizontalTail/LeftElevator
 @onready var right_elevator: MeshInstance3D = $HorizontalTail/RightElevator
 @onready var rudder: MeshInstance3D = $VerticalTail/Rudder
@@ -251,6 +254,9 @@ func _input(event: InputEvent) -> void:
 
 	if event is InputEventKey and event.pressed and not event.is_echo():
 		match event.keycode:
+			KEY_B:
+				speedbrake_active = not speedbrake_active
+				print("Speedbrake: ", "OPEN" if speedbrake_active else "CLOSED")
 			KEY_F:
 				_cycle_weapon()
 			KEY_R:
@@ -447,6 +453,9 @@ func _apply_flight_physics(delta: float) -> void:
 
 	# Flaps add drag
 	current_cd += flaps_input * flaps_cd_penalty
+	# Speedbrake drag
+	if speedbrake_active:
+		current_cd += 0.35
 	# Landing gear drag
 	if gear_down and gear_position > 0.5:
 		current_cd += 0.12 * gear_position
@@ -636,7 +645,7 @@ func _apply_ground_forces(_delta: float) -> void:
 		var lat_dir: Vector3 = wheel_laterals[i]
 		var lat_speed: float = lat_dir.dot(linear_velocity)
 		if absf(lat_speed) > 0.05:
-			var grip_force: float = minf(absf(lat_speed) * mass * 2.0 / 3.0, max_grip_per_wheel)
+			var grip_force: float = minf(absf(lat_speed) * mass * 20.0, max_grip_per_wheel)
 			var friction_vec: Vector3 = -lat_dir * sign(lat_speed) * grip_force
 			var force_pos: Vector3 = col.global_position - global_position
 			apply_force(friction_vec, force_pos)
@@ -679,6 +688,13 @@ func _animate_control_surfaces() -> void:
 		left_flap.rotation.x = flap_angle
 	if right_flap:
 		right_flap.rotation.x = flap_angle
+
+	# Speedbrakes - rotate outward when deployed
+	var sb_angle: float = deg_to_rad(60.0) if speedbrake_active else 0.0
+	if left_speedbrake:
+		left_speedbrake.rotation.x = sb_angle
+	if right_speedbrake:
+		right_speedbrake.rotation.x = -sb_angle
 
 func _break_next_part() -> void:
 	if damage_index >= damage_sequence.size():
