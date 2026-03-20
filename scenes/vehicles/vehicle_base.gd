@@ -62,11 +62,13 @@ const DOUBLE_TAP_TIME := 0.3      # seconds
 @onready var third_person_camera: Camera3D = $ThirdPersonCamera
 @onready var exit_position: Marker3D = $ExitPosition
 var _tp_default_pos: Vector3  # stored on ready for orbit calculations
+var planet_up: Vector3 = Vector3.UP  # unit vector away from planet centre, updated each frame
 
 func _ready() -> void:
 	# Set up physics
 	collision_layer = 4  # Vehicles layer
 	collision_mask = 5   # World + Vehicles layers
+	gravity_scale = 0.0  # Use custom spherical gravity instead
 
 	# Disable cameras initially
 	if cockpit_camera:
@@ -132,6 +134,7 @@ func _unhandled_input(event: InputEvent) -> void:
 const MAX_SPEED := 1000.0          # m/s hard cap (~Mach 3)
 const ORIGIN_SHIFT_THRESHOLD := 3000.0  # meters from origin before shifting
 const MAX_ALTITUDE := 20000.0      # meters above/below origin before clamping
+const PLANET_RADIUS := 100_000.0   # matches terrain_generator.gd
 
 func _physics_process(delta: float) -> void:
 	# Sanity: clamp velocity to prevent physics explosion
@@ -152,6 +155,15 @@ func _physics_process(delta: float) -> void:
 	# Cap downward velocity when near ground level so a spike can't skip past terrain.
 	if altitude_agl < 15.0 and linear_velocity.y < -80.0:
 		linear_velocity.y = -80.0
+
+	# Spherical gravity: pull toward planet centre (accounts for floating origin)
+	var terrain := get_tree().current_scene.get_node_or_null("ProceduralTerrain")
+	var world_off := Vector3.ZERO
+	if terrain:
+		world_off = terrain._world_offset
+	var planet_center := Vector3(-world_off.x, -PLANET_RADIUS, -world_off.z)
+	var to_center := (planet_center - global_position).normalized()
+	apply_central_force(to_center * mass * 9.81)
 
 	_update_flight_data()
 
@@ -203,7 +215,7 @@ func _process(delta: float) -> void:
 		var fwd: Vector3 = -global_transform.basis.z
 		# Use world UP to derive a level right vector; fall back to basis.x near vertical
 		# Near-vertical flight: world UP is parallel to fwd, use aircraft right instead
-		var ref_up := Vector3.UP if absf(fwd.dot(Vector3.UP)) < 0.95 else global_transform.basis.x
+		var ref_up := planet_up if absf(fwd.dot(planet_up)) < 0.95 else global_transform.basis.x
 		var cam_right: Vector3 = ref_up.cross(fwd).normalized()
 		var cam_up: Vector3 = fwd.cross(cam_right).normalized()
 		var no_roll_basis := Basis(cam_right, cam_up, -fwd)
@@ -226,25 +238,34 @@ func _update_flight_data() -> void:
 	# Airspeed (magnitude of velocity)
 	airspeed = linear_velocity.length()
 
-	# Altitude MSL is just Y position
-	altitude_msl = global_position.y
+	# Gravity direction toward planet centre (accounts for floating origin)
+	var _terrain_node := get_tree().current_scene.get_node_or_null("ProceduralTerrain")
+	var _woff := Vector3.ZERO
+	if _terrain_node:
+		_woff = _terrain_node._world_offset
+	var planet_center := Vector3(-_woff.x, -PLANET_RADIUS, -_woff.z)
+	var to_center := (planet_center - global_position).normalized()
+	planet_up = -to_center
 
-	# Altitude AGL - raycast down
+	# Altitude MSL = distance from planet centre minus planet radius
+	altitude_msl = (global_position - planet_center).length() - PLANET_RADIUS
+
+	# Altitude AGL — raycast toward planet centre instead of straight down
 	var space_state := get_world_3d().direct_space_state
 	var query := PhysicsRayQueryParameters3D.create(
 		global_position,
-		global_position + Vector3.DOWN * 10000,
+		global_position + to_center * 10000,
 		1  # World layer
 	)
 	query.exclude = [get_rid()]
 	var result := space_state.intersect_ray(query)
 	if result:
-		altitude_agl = global_position.y - result.position.y
+		altitude_agl = global_position.distance_to(result.position)
 	else:
 		altitude_agl = altitude_msl
 
-	# Vertical speed
-	vertical_speed = linear_velocity.y
+	# Vertical speed (positive = climbing away from planet centre)
+	vertical_speed = linear_velocity.dot(-to_center)
 
 	# Heading
 	var forward := -global_transform.basis.z
@@ -278,12 +299,14 @@ func mount(player: Player) -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 	pilot_mounted.emit(player)
+	add_to_group("terrain_anchor")
 
 func unmount() -> void:
 	# Store pilot reference before clearing
 	var pilot := current_pilot
 
 	is_occupied = false
+	remove_from_group("terrain_anchor")
 	current_pilot = null
 	engine_running = false
 

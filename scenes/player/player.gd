@@ -6,6 +6,7 @@ class_name Player
 signal entered_vehicle(vehicle: Vehicle)
 signal exited_vehicle()
 
+const ORIGIN_SHIFT_THRESHOLD := 3000.0
 const SPEED := 5.0
 const SPRINT_SPEED := 8.0
 const JUMP_VELOCITY := 4.5
@@ -18,6 +19,7 @@ const FREELOOK_RETURN_SPEED := 5.0
 const FREELOOK_MAX_PITCH := 1.4  # ~80 degrees
 const FREELOOK_MAX_YAW := PI     # Full 180 degrees
 const DOUBLE_TAP_TIME := 0.3
+const PLANET_RADIUS   := 100_000.0
 
 @onready var camera: Camera3D = $Camera3D
 @onready var third_person_camera: Camera3D = $ThirdPersonCamera
@@ -42,6 +44,7 @@ var _hint_label: Label
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	add_to_group("terrain_anchor")
 	if third_person_camera:
 		_tp_default_pos = third_person_camera.position
 
@@ -145,13 +148,21 @@ func _physics_process(delta: float) -> void:
 	if is_in_vehicle:
 		return
 
-	# Gravity
+	# Spherical gravity: pull toward planet centre
+	var terrain_node: Node = get_tree().current_scene.get_node_or_null("ProceduralTerrain")
+	var world_off := Vector3.ZERO
+	if terrain_node:
+		world_off = terrain_node._world_offset
+	var planet_center := Vector3(-world_off.x, -PLANET_RADIUS, -world_off.z)
+	var up := (global_position - planet_center).normalized()
+	up_direction = up
+
 	if not is_on_floor():
-		velocity.y -= gravity * delta
+		velocity -= up * gravity * delta
 
 	# Jump
 	if Input.is_action_just_pressed("jump") and is_on_floor():
-		velocity.y = JUMP_VELOCITY
+		velocity += up * JUMP_VELOCITY
 
 	# Movement
 	var input_dir := Input.get_vector("move_left", "move_right", "move_forward", "move_backward")
@@ -168,9 +179,31 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
+	# Floating origin: keep player near scene origin for floating-point precision
+	var xz_sq := global_position.x * global_position.x + global_position.z * global_position.z
+	if xz_sq > ORIGIN_SHIFT_THRESHOLD * ORIGIN_SHIFT_THRESHOLD:
+		_shift_world_origin()
+
 	# Vehicle interaction
 	if Input.is_action_just_pressed("interact") and interact_cooldown <= 0:
 		_try_interact()
+
+func _shift_world_origin() -> void:
+	var offset := Vector3(global_position.x, 0.0, global_position.z)
+	if offset.length_squared() < 1.0:
+		return
+	var scene_root := get_tree().current_scene
+	for child in scene_root.get_children():
+		if child is RigidBody3D:
+			var xform: Transform3D = child.global_transform
+			xform.origin -= offset
+			PhysicsServer3D.body_set_state(child.get_rid(), PhysicsServer3D.BODY_STATE_TRANSFORM, xform)
+			child.global_transform = xform
+		elif child is Node3D:
+			child.global_position -= offset
+			if child.has_method("notify_origin_shift"):
+				child.notify_origin_shift(offset)
+
 
 func _try_interact() -> void:
 	if interaction_ray.is_colliding():
@@ -215,6 +248,7 @@ func enter_vehicle(vehicle: Vehicle) -> void:
 		third_person_camera.current = false
 
 	# Mount the vehicle
+	remove_from_group("terrain_anchor")
 	vehicle.mount(self)
 	entered_vehicle.emit(vehicle)
 
@@ -242,6 +276,7 @@ func exit_vehicle() -> void:
 	# Prevent immediate re-entry
 	interact_cooldown = 0.5
 
+	add_to_group("terrain_anchor")
 	exited_vehicle.emit()
 
 func _toggle_camera() -> void:

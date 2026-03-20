@@ -11,6 +11,8 @@
 [ext_resource type="PackedScene" path="res://scenes/vehicles/tank.tscn" id="10_tank"]
 [ext_resource type="PackedScene" path="res://scenes/vehicles/humvee.tscn" id="11_humvee"]
 [ext_resource type="Script" uid="uid://dq8db2hebafy1" path="res://scenes/main.gd" id="12_main"]
+[ext_resource type="Script" path="res://scenes/water_sphere.gd" id="14_water"]
+[ext_resource type="Script" path="res://scenes/cloud_layer.gd" id="15_clouds"]
 
 [sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
 sky_top_color = Color(0.35, 0.55, 0.85, 1)
@@ -231,3 +233,10 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -45, 1, 0)
 
 [node name="Humvee" parent="." unique_id=1490894540 instance=ExtResource("11_humvee")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 50, 1, -20)
+
+[node name="WaterSphere" type="Node3D" parent="." unique_id=2135313401]
+script = ExtResource("14_water")
+
+[node name="CloudLayer" type="Node3D" parent="." unique_id=2135313402]
+script = ExtResource("15_clouds")
+

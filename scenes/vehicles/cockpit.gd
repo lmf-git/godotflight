@@ -249,11 +249,14 @@ func _update_artificial_horizon() -> void:
 	var up := vehicle.global_transform.basis.y
 	var right := vehicle.global_transform.basis.x
 
-	# Pitch: asin is stable at all attitudes (no singularity at ±90°)
-	var pitch_angle := asin(clamp(forward.y, -1.0, 1.0))
+	# Use spherical planet up so the horizon is correct on a curved planet
+	var pup := vehicle.planet_up
 
-	# Roll: atan2 is stable everywhere, no gimbal lock
-	var roll_angle := atan2(-right.y, up.y)
+	# Pitch: angle of nose above the local planet horizon
+	var pitch_angle := asin(clamp(forward.dot(pup), -1.0, 1.0))
+
+	# Roll: bank angle relative to local planet up (not world Y)
+	var roll_angle := atan2(-right.dot(pup), up.dot(pup))
 
 	ah_material.set_shader_parameter("pitch", pitch_angle)
 	ah_material.set_shader_parameter("roll", roll_angle)

@@ -1,39 +1,47 @@
 extends CanvasLayer
 
-## Full-screen map overlay toggled with M key.
-## Player-centered: regenerates around the player's true world position each time
-## it's opened, accounting for floating origin shifts.
-## Image generation runs on WorkerThreadPool to avoid main-thread hitches.
+## Orbit-camera map — press M to open/close.
+## Shows the real 3D world from a satellite/orbital camera.
+## Terrain chunks render at all altitudes at progressively lower LOD.
+## Drag to orbit, scroll/pinch to zoom, Shift+click to place a waypoint beacon.
 
-const MAP_SIZE := 256          # pixels (lower res, terrain is summarised)
-const MIN_VIEW_RADIUS := 1500.0
-const MAX_VIEW_RADIUS := 50000.0
-const ZOOM_STEP := 1.12        # multiplier per scroll tick
-const RUNWAY_HALF_W := 15.0
-const RUNWAY_HALF_L := 750.0
-const _SAVE_PATH := "user://map_settings.cfg"
+const PLANET_RADIUS := 100_000.0
+const _SAVE_PATH    := "user://map_settings.cfg"
+const ZOOM_STEP     := 1.14
+const MIN_DIST      :=    300.0    # just above ground
+const MAX_DIST      := 500_000.0   # orbital altitude (~500 km)
 
-var _view_radius := 12000.0    # current zoom level (meters from center to edge)
-var _pan_accum := 0.0          # accumulated trackpad pan delta
-var _terrain_tex: ImageTexture
+# Orbit state
+var _orbit_camera:  Camera3D
+var _prev_camera:   Camera3D
+var _orbit_yaw:     float = 0.0
+var _orbit_pitch:   float = 1.45   # radians from horizontal (~83° = near top-down, above player)
+var _orbit_dist:    float = 4_000.0  # start 4 km above player
+var _dragging:      bool  = false
+
+# Map terrain anchor — invisible node placed at the orbit surface focus.
+# terrain_generator checks for the "map_terrain_anchor" group so it loads
+# chunks wherever the map camera is looking, not just around the player.
+var _map_anchor: Node3D
+
+# Objective markers
+var _objective_markers: Array[Vector2] = []
+var _objective_nodes:   Array[Node3D]  = []
+
+# Noise — used only to place beacons at the correct terrain height
 var _noise: FastNoiseLite
-var _detail_noise: FastNoiseLite
-var _max_height := 120.0
-var _flat_rect := Rect2(-80, -900, 160, 1800)
-var _blend_margin := 150.0
-var _generating := false
+var _max_height    := 120.0
+var _flat_rect     := Rect2(-80, -900, 160, 1800)
+var _blend_margin  := 150.0
 
-var _bg: ColorRect
-var _map_rect: TextureRect
-var _marker: Control
+# UI
 var _coords_label: Label
-var _objective_overlay: Control
+var _overlay:      Control
 
-var _objective_markers: Array[Vector2] = []   # world (X, Z) per marker
-var _objective_nodes: Array[Node3D] = []      # 3D beacon per marker
-var _map_center_x: float = 0.0
-var _map_center_z: float = 0.0
 
+# ──────────────────────────────────────────────────────────────────────────────
+#  Lifecycle
+# ──────────────────────────────────────────────────────────────────────────────
 
 func _ready() -> void:
 	visible = false
@@ -42,89 +50,6 @@ func _ready() -> void:
 	_build_ui()
 	add_to_group("map_overlay")
 
-func toggle() -> void:
-	visible = not visible
-	if visible:
-		_generate_map()
-	else:
-		_free_map_texture()
-
-
-func _input(event: InputEvent) -> void:
-	if event.is_action_pressed("toggle_map"):
-		visible = not visible
-		if visible:
-			_generate_map()
-		else:
-			_free_map_texture()
-		get_viewport().set_input_as_handled()
-		return
-
-	if not visible:
-		return
-
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_zoom_in()
-			get_viewport().set_input_as_handled()
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_zoom_out()
-			get_viewport().set_input_as_handled()
-		elif event.button_index == MOUSE_BUTTON_LEFT and event.pressed and event.shift_pressed:
-			var local_pos := _map_rect.get_local_mouse_position()
-			var u := local_pos.x / _map_rect.size.x
-			var v := local_pos.y / _map_rect.size.y
-			if u >= 0.0 and u <= 1.0 and v >= 0.0 and v <= 1.0:
-				var extent := _view_radius * 2.0
-				var wx := _map_center_x - (u - 0.5) * extent
-				var wz := _map_center_z + (0.5 - v) * extent
-				_add_objective_marker(wx, wz)
-			get_viewport().set_input_as_handled()
-
-	# Mac trackpad: two-finger scroll — accumulate to avoid over-sensitivity
-	if event is InputEventPanGesture:
-		_pan_accum += event.delta.y
-		if _pan_accum < -8.0:
-			_zoom_in()
-			_pan_accum = 0.0
-		elif _pan_accum > 8.0:
-			_zoom_out()
-			_pan_accum = 0.0
-		get_viewport().set_input_as_handled()
-
-	# Mac trackpad: pinch to zoom
-	if event is InputEventMagnifyGesture:
-		if event.factor > 1.0:
-			_zoom_in()
-		elif event.factor < 1.0:
-			_zoom_out()
-		get_viewport().set_input_as_handled()
-
-
-func _process(_delta: float) -> void:
-	_update_objective_beacons()
-	if not visible:
-		return
-	_update_marker()
-	if _objective_overlay:
-		_objective_overlay.queue_redraw()
-
-
-func _get_world_offset() -> Vector3:
-	var terrain := get_parent().get_node_or_null("ProceduralTerrain")
-	if terrain:
-		return terrain._world_offset
-	return Vector3.ZERO
-
-
-func _get_player_world_pos() -> Vector3:
-	var cam := get_viewport().get_camera_3d()
-	if not cam:
-		return Vector3.ZERO
-	return cam.global_position + _get_world_offset()
-
-
-# --- Noise setup (mirrors terrain_generator.gd) ---
 
 func _setup_noise() -> void:
 	_noise = FastNoiseLite.new()
@@ -133,196 +58,253 @@ func _setup_noise() -> void:
 	_noise.frequency = 0.0008
 	_noise.fractal_type = FastNoiseLite.FRACTAL_FBM
 	_noise.fractal_octaves = 4
-	_noise.fractal_lacunarity = 2.0
-	_noise.fractal_gain = 0.5
 
-	_detail_noise = FastNoiseLite.new()
-	_detail_noise.seed = 42 + 7
-	_detail_noise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
-	_detail_noise.frequency = 0.004
-	_detail_noise.fractal_octaves = 2
-
-
-# --- UI construction ---
 
 func _build_ui() -> void:
-	_bg = ColorRect.new()
-	_bg.color = Color(0, 0, 0, 0.75)
-	_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(_bg)
+	# Top bar
+	var top_bg := ColorRect.new()
+	top_bg.color = Color(0, 0, 0, 0.60)
+	top_bg.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top_bg.custom_minimum_size = Vector2(0, 44)
+	add_child(top_bg)
 
-	_map_rect = TextureRect.new()
-	_map_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_map_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_map_rect.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
-	_bg.add_child(_map_rect)
+	var hint := Label.new()
+	hint.text = "SATELLITE MAP  |  Drag to orbit  •  Scroll/pinch to zoom (ground → orbit → space)  •  Shift+click to place waypoint  •  M to close"
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	hint.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	hint.custom_minimum_size = Vector2(0, 44)
+	hint.add_theme_font_size_override("font_size", 15)
+	add_child(hint)
 
-	_marker = _MarkerNode.new()
-	_map_rect.add_child(_marker)
-
-	var obj_overlay := _ObjectiveOverlay.new()
-	obj_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	obj_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	obj_overlay.map_ref = self
-	_map_rect.add_child(obj_overlay)
-	_objective_overlay = obj_overlay
+	# Bottom bar
+	var bot_bg := ColorRect.new()
+	bot_bg.color = Color(0, 0, 0, 0.60)
+	bot_bg.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	bot_bg.custom_minimum_size = Vector2(0, 34)
+	add_child(bot_bg)
 
 	_coords_label = Label.new()
 	_coords_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_coords_label.add_theme_font_size_override("font_size", 18)
-	_bg.add_child(_coords_label)
+	_coords_label.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_coords_label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	_coords_label.custom_minimum_size = Vector2(0, 34)
+	_coords_label.add_theme_font_size_override("font_size", 15)
+	add_child(_coords_label)
 
-	get_viewport().size_changed.connect(_layout)
-	_layout.call_deferred()
-
-
-func _layout() -> void:
-	var vp_size := get_viewport().get_visible_rect().size
-	var map_px := int(vp_size.y * 0.80)
-	_map_rect.custom_minimum_size = Vector2(map_px, map_px)
-	_map_rect.size = Vector2(map_px, map_px)
-	_map_rect.position = Vector2((vp_size.x - map_px) * 0.5, (vp_size.y - map_px) * 0.5)
-
-	_coords_label.size = Vector2(vp_size.x, 30)
-	_coords_label.position = Vector2(0, _map_rect.position.y + map_px + 8)
+	# Full-screen drawing overlay (player marker + objective dots)
+	_overlay = _MarkerOverlay.new()
+	_overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_overlay.map_ref = self
+	add_child(_overlay)
 
 
-# --- Map image generation (threaded, centered on player) ---
+# ──────────────────────────────────────────────────────────────────────────────
+#  Toggle
+# ──────────────────────────────────────────────────────────────────────────────
 
-func _generate_map() -> void:
-	if _generating:
-		return
-	_generating = true
-	var center := _get_player_world_pos()
-	_map_center_x = center.x
-	_map_center_z = center.z
-	WorkerThreadPool.add_task(_build_map_image.bind(center.x, center.z, _view_radius))
-
-
-func _build_map_image(cx: float, cz: float, radius: float) -> void:
-	var img := Image.create(MAP_SIZE, MAP_SIZE, false, Image.FORMAT_RGB8)
-	var extent := radius * 2.0
-	for py in range(MAP_SIZE):
-		var wz := cz + (0.5 - float(py) / MAP_SIZE) * extent
-		for px in range(MAP_SIZE):
-			var wx := cx - (float(px) / MAP_SIZE - 0.5) * extent
-
-			if abs(wx) <= RUNWAY_HALF_W and abs(wz) <= RUNWAY_HALF_L:
-				img.set_pixel(px, py, Color(0.25, 0.25, 0.25))
-				continue
-
-			var h := _sample_height(wx, wz)
-			img.set_pixel(px, py, _height_color(h, wx, wz))
-
-	_apply_map_image.call_deferred(img)
-
-
-func _apply_map_image(img: Image) -> void:
-	_generating = false
-	_terrain_tex = ImageTexture.create_from_image(img)
-	_map_rect.texture = _terrain_tex
-
-
-func _free_map_texture() -> void:
-	_map_rect.texture = null
-	_terrain_tex = null
-
-
-func _zoom_in() -> void:
-	_view_radius = maxf(_view_radius / ZOOM_STEP, MIN_VIEW_RADIUS)
-	_save_settings()
-	_generate_map()
-
-
-func _zoom_out() -> void:
-	_view_radius = minf(_view_radius * ZOOM_STEP, MAX_VIEW_RADIUS)
-	_save_settings()
-	_generate_map()
-
-
-func _save_settings() -> void:
-	var cfg := ConfigFile.new()
-	cfg.set_value("map", "view_radius", _view_radius)
-	cfg.save(_SAVE_PATH)
-
-
-func _load_settings() -> void:
-	var cfg := ConfigFile.new()
-	if cfg.load(_SAVE_PATH) == OK:
-		_view_radius = cfg.get_value("map", "view_radius", 12000.0)
-
-
-func _sample_height(world_x: float, world_z: float) -> float:
-	var h := _noise.get_noise_2d(world_x, world_z) * _max_height
-	h += _detail_noise.get_noise_2d(world_x, world_z) * _max_height * 0.15
-	return h * _runway_blend(world_x, world_z)
-
-
-func _runway_blend(world_x: float, world_z: float) -> float:
-	var dx := 0.0
-	if world_x < _flat_rect.position.x:
-		dx = _flat_rect.position.x - world_x
-	elif world_x > _flat_rect.end.x:
-		dx = world_x - _flat_rect.end.x
-	var dz := 0.0
-	if world_z < _flat_rect.position.y:
-		dz = _flat_rect.position.y - world_z
-	elif world_z > _flat_rect.end.y:
-		dz = world_z - _flat_rect.end.y
-	var dist := sqrt(dx * dx + dz * dz)
-	if dist <= 0.0:
-		return 0.0
-	if dist >= _blend_margin:
-		return 1.0
-	var t := dist / _blend_margin
-	return t * t * (3.0 - 2.0 * t)
-
-
-func _height_color(h: float, world_x: float, world_z: float) -> Color:
-	if _runway_blend(world_x, world_z) < 0.1:
-		return Color(0.35, 0.52, 0.25)
-	var base_green := Color(0.3, 0.48, 0.2)
-	var dark_green := Color(0.2, 0.35, 0.12)
-	var brown := Color(0.4, 0.32, 0.18)
-	var rock := Color(0.45, 0.42, 0.38)
-	var norm_h := clampf(h / _max_height, -1.0, 1.0)
-	if norm_h < 0.0:
-		return dark_green.lerp(base_green, norm_h + 1.0)
-	elif norm_h < 0.5:
-		return base_green.lerp(brown, norm_h * 2.0)
+func toggle() -> void:
+	if not visible:
+		_open_map()
 	else:
-		return brown.lerp(rock, (norm_h - 0.5) * 2.0)
+		_close_map()
+	visible = not visible
 
 
-# --- Player marker (always centered) ---
+func _open_map() -> void:
+	# Remember which camera was active
+	_prev_camera = get_viewport().get_camera_3d()
 
-func _update_marker() -> void:
-	var cam := get_viewport().get_camera_3d()
-	if not cam:
+	# Create the orbit camera once and keep it; near/far set dynamically per frame.
+	if not _orbit_camera or not is_instance_valid(_orbit_camera):
+		_orbit_camera = Camera3D.new()
+		_orbit_camera.fov = 55.0
+		get_tree().current_scene.add_child(_orbit_camera)
+
+	# Map terrain anchor — tells terrain_generator to load at the orbit focus.
+	if not _map_anchor or not is_instance_valid(_map_anchor):
+		_map_anchor = Node3D.new()
+		_map_anchor.add_to_group("map_terrain_anchor")
+		get_tree().current_scene.add_child(_map_anchor)
+
+	_orbit_camera.current = true
+	_update_orbit_camera()
+
+
+func _close_map() -> void:
+	_dragging = false
+	if _orbit_camera and is_instance_valid(_orbit_camera):
+		_orbit_camera.current = false
+	if _prev_camera and is_instance_valid(_prev_camera):
+		_prev_camera.current = true
+	_prev_camera = null
+	# Remove the terrain anchor so chunks load around the player again.
+	if _map_anchor and is_instance_valid(_map_anchor):
+		_map_anchor.queue_free()
+		_map_anchor = null
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Input
+# ──────────────────────────────────────────────────────────────────────────────
+
+func _input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_map"):
+		toggle()
+		get_viewport().set_input_as_handled()
 		return
 
-	var map_px := _map_rect.size.x
-	_marker.position = Vector2(map_px * 0.5, map_px * 0.5)
+	if not visible:
+		return
 
-	var heading := -cam.global_basis.z
-	_marker.heading_angle = atan2(heading.x, -heading.z)
-	_marker.queue_redraw()
+	if event is InputEventMouseButton:
+		match event.button_index:
+			MOUSE_BUTTON_WHEEL_UP:
+				if event.pressed:
+					_orbit_dist = maxf(_orbit_dist / ZOOM_STEP, MIN_DIST)
+					_save_settings()
+					_update_orbit_camera()
+			MOUSE_BUTTON_WHEEL_DOWN:
+				if event.pressed:
+					_orbit_dist = minf(_orbit_dist * ZOOM_STEP, MAX_DIST)
+					_save_settings()
+					_update_orbit_camera()
+			MOUSE_BUTTON_LEFT:
+				if event.pressed and event.shift_pressed:
+					_try_place_waypoint(event.position)
+				elif event.pressed:
+					_dragging = true
+				else:
+					_dragging = false
+		get_viewport().set_input_as_handled()
 
-	var world_pos := _get_player_world_pos()
-	_coords_label.text = "X: %.0f  Z: %.0f  Alt: %.0f m" % [world_pos.x, world_pos.z, world_pos.y]
+	if event is InputEventMouseMotion and _dragging:
+		_orbit_yaw   -= event.relative.x * 0.005
+		_orbit_pitch  = clampf(_orbit_pitch - event.relative.y * 0.005, -PI * 0.499, PI * 0.499)
+		_update_orbit_camera()
+		get_viewport().set_input_as_handled()
+
+	if event is InputEventMagnifyGesture:
+		_orbit_dist = clampf(_orbit_dist / event.factor, MIN_DIST, MAX_DIST)
+		_update_orbit_camera()
+		get_viewport().set_input_as_handled()
+
+	if event is InputEventPanGesture:
+		_orbit_yaw   -= event.delta.x * 0.012
+		_orbit_pitch  = clampf(_orbit_pitch - event.delta.y * 0.012, -PI * 0.499, PI * 0.499)
+		_update_orbit_camera()
+		get_viewport().set_input_as_handled()
 
 
-# --- Objective markers ---
+# ──────────────────────────────────────────────────────────────────────────────
+#  Per-frame
+# ──────────────────────────────────────────────────────────────────────────────
 
-func _world_to_map_pixel(wx: float, wz: float) -> Vector2:
-	var extent := _view_radius * 2.0
-	var u := 0.5 - (wx - _map_center_x) / extent
-	var v := 0.5 - (wz - _map_center_z) / extent
-	return Vector2(u * _map_rect.size.x, v * _map_rect.size.y)
+func _process(_delta: float) -> void:
+	_update_objective_beacons()
+	if not visible:
+		return
+	# Re-position orbit camera every frame so it stays centred on the player
+	# even while the floating-origin system shifts the world around.
+	_update_orbit_camera()
+	_update_coords()
+	_overlay.queue_redraw()
 
+
+func _update_orbit_camera() -> void:
+	if not _orbit_camera or not is_instance_valid(_orbit_camera):
+		return
+
+	# Dynamic near/far covering the full planet from any altitude.
+	# near keeps depth precision; far covers the entire sphere silhouette.
+	_orbit_camera.near = clampf(_orbit_dist * 0.005, 5.0, 5000.0)
+	_orbit_camera.far  = PLANET_RADIUS * 3.0 + _orbit_dist * 5.0
+
+	var p := _orbit_pitch
+	var y := _orbit_yaw
+
+	# Orbit direction (unit vector from planet centre toward the camera).
+	var orbit_dir := Vector3(cos(p) * sin(y), sin(p), cos(p) * cos(y))
+
+	# Planet centre is fixed at (0, -PLANET_RADIUS, 0) in scene space.
+	# Camera sits at surface + orbit_dist along orbit_dir.
+	var planet_center := Vector3(0.0, -PLANET_RADIUS, 0.0)
+	_orbit_camera.global_position = planet_center + orbit_dir * (PLANET_RADIUS + _orbit_dist)
+
+	# look_at needs an up vector not parallel to the view direction.
+	# Near the poles orbit_dir ≈ ±Y, so switch to a side vector to avoid gimbal lock.
+	var up_hint := Vector3.UP if abs(orbit_dir.y) < 0.98 else Vector3(1.0, 0.0, 0.0)
+	_orbit_camera.look_at(planet_center, up_hint)
+
+	# Move the map terrain anchor to the sphere surface below the orbit camera.
+	# Terrain chunks only exist on the northern hemisphere (cube-sphere top face),
+	# so clamp orbit_dir to positive-Y before computing the surface focus.
+	if _map_anchor and is_instance_valid(_map_anchor):
+		var terrain_dir := orbit_dir
+		if terrain_dir.y < 0.05:
+			# Looking at or below equator: snap anchor to equatorial ring in yaw direction.
+			terrain_dir = Vector3(terrain_dir.x, 0.05, terrain_dir.z).normalized()
+		_map_anchor.global_position = planet_center + terrain_dir * PLANET_RADIUS
+
+
+func _get_player_scene_pos() -> Vector3:
+	# Use the first terrain_anchor (player or occupied vehicle) if available,
+	# otherwise fall back to scene origin (where the player always is anyway).
+	var anchors := get_tree().get_nodes_in_group("terrain_anchor")
+	if not anchors.is_empty():
+		return (anchors[0] as Node3D).global_position
+	return Vector3.ZERO
+
+
+func _update_coords() -> void:
+	if not _prev_camera or not is_instance_valid(_prev_camera):
+		return
+	var world_off := _get_world_offset()
+	var world_pos := _prev_camera.global_position + world_off
+	_coords_label.text = "X: %.0f  Z: %.0f  Alt: %.0f m  |  View radius: %.0f m" % [
+		world_pos.x, world_pos.z, world_pos.y, _orbit_dist
+	]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Waypoint placement (physics raycast through the orbit camera)
+# ──────────────────────────────────────────────────────────────────────────────
+
+func _try_place_waypoint(screen_pos: Vector2) -> void:
+	if not _orbit_camera or not is_instance_valid(_orbit_camera):
+		return
+	var space      := _orbit_camera.get_world_3d().direct_space_state
+	var ray_origin := _orbit_camera.project_ray_origin(screen_pos)
+	var ray_dir    := _orbit_camera.project_ray_normal(screen_pos)
+	var query      := PhysicsRayQueryParameters3D.create(
+		ray_origin,
+		ray_origin + ray_dir * (PLANET_RADIUS * 2.5 + _orbit_dist),
+		1  # world layer
+	)
+	var hit := space.intersect_ray(query)
+	if hit:
+		var world_off := _get_world_offset()
+		var hit_world: Vector3 = hit["position"] + world_off
+		_add_objective_marker(hit_world.x, hit_world.z)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Helpers
+# ──────────────────────────────────────────────────────────────────────────────
+
+func _get_world_offset() -> Vector3:
+	var terrain: Node = get_parent().get_node_or_null("ProceduralTerrain")
+	if terrain:
+		return terrain._world_offset
+	return Vector3.ZERO
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Objective markers
+# ──────────────────────────────────────────────────────────────────────────────
 
 func _add_objective_marker(wx: float, wz: float) -> void:
-	# Clear existing marker first
 	for node in _objective_nodes:
 		if is_instance_valid(node):
 			node.queue_free()
@@ -377,38 +359,97 @@ func _update_objective_beacons() -> void:
 		node.global_position = Vector3(wx - world_off.x, wy, wz - world_off.z)
 
 
-# --- Inner class for map objective overlay ---
+# ──────────────────────────────────────────────────────────────────────────────
+#  Noise (mirrors terrain_generator.gd — used for beacon placement height)
+# ──────────────────────────────────────────────────────────────────────────────
 
-class _ObjectiveOverlay extends Control:
-	var map_ref  # reference to the map_overlay node
+func _sample_height(world_x: float, world_z: float) -> float:
+	var h := _noise.get_noise_2d(world_x, world_z) * _max_height
+	h *= _runway_blend(world_x, world_z)
+	# Sphere-surface Y (matches terrain_generator logic)
+	var dir := Vector3(world_x, PLANET_RADIUS, world_z).normalized()
+	return (dir * (PLANET_RADIUS + h)).y - PLANET_RADIUS
+
+
+func _runway_blend(world_x: float, world_z: float) -> float:
+	var dx := 0.0
+	if world_x < _flat_rect.position.x:
+		dx = _flat_rect.position.x - world_x
+	elif world_x > _flat_rect.end.x:
+		dx = world_x - _flat_rect.end.x
+	var dz := 0.0
+	if world_z < _flat_rect.position.y:
+		dz = _flat_rect.position.y - world_z
+	elif world_z > _flat_rect.end.y:
+		dz = world_z - _flat_rect.end.y
+	var dist := sqrt(dx * dx + dz * dz)
+	if dist <= 0.0:
+		return 0.0
+	if dist >= _blend_margin:
+		return 1.0
+	var t := dist / _blend_margin
+	return t * t * (3.0 - 2.0 * t)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Settings persistence
+# ──────────────────────────────────────────────────────────────────────────────
+
+func _save_settings() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("map", "view_radius", _orbit_dist)
+	cfg.save(_SAVE_PATH)
+
+
+func _load_settings() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load(_SAVE_PATH) == OK:
+		_orbit_dist = cfg.get_value("map", "view_radius", 4000.0)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Inner class: draws player marker + objective dots over the 3D view
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _MarkerOverlay extends Control:
+	var map_ref  # outer CanvasLayer reference
 
 	func _draw() -> void:
-		if not map_ref or map_ref._objective_markers.is_empty():
+		if not map_ref:
 			return
+		var cam: Camera3D = map_ref._orbit_camera
+		if not cam or not is_instance_valid(cam) or not cam.current:
+			return
+
+		var world_off := Vector3.ZERO
+		var terrain: Node = map_ref.get_parent().get_node_or_null("ProceduralTerrain")
+		if terrain:
+			world_off = terrain._world_offset
+
+		# Player marker
+		var prev: Camera3D = map_ref._prev_camera
+		if prev and is_instance_valid(prev):
+			var ppos := prev.global_position
+			if cam.is_position_in_frustum(ppos):
+				var sp := cam.unproject_position(ppos)
+				draw_circle(sp, 9.0, Color.WHITE)
+				draw_circle(sp, 7.0, Color(1.0, 0.3, 0.2))
+				# Heading line: project a point forward in the player's look direction
+				var fwd := -prev.global_basis.z
+				var ahead := ppos + fwd * maxf(map_ref._orbit_dist * 0.02, 80.0)
+				if cam.is_position_in_frustum(ahead):
+					draw_line(sp, cam.unproject_position(ahead), Color.WHITE, 2.5)
+
+		# Objective markers
 		for marker: Vector2 in map_ref._objective_markers:
-			var px: Vector2 = map_ref._world_to_map_pixel(marker.x, marker.y)
-			if px.x < -16 or px.x > size.x + 16 or px.y < -16 or px.y > size.y + 16:
-				continue
-			var c := Color(1.0, 0.85, 0.0)
-			draw_circle(px, 6.0, c)
-			draw_arc(px, 11.0, 0, TAU, 20, Color(1.0, 1.0, 0.5), 2.0)
-			var arm := 6.0
-			var gap := 12.0
-			draw_line(px + Vector2(-gap - arm, 0), px + Vector2(-gap, 0), c, 2.0)
-			draw_line(px + Vector2(gap, 0), px + Vector2(gap + arm, 0), c, 2.0)
-			draw_line(px + Vector2(0, -gap - arm), px + Vector2(0, -gap), c, 2.0)
-			draw_line(px + Vector2(0, gap), px + Vector2(0, gap + arm), c, 2.0)
-
-
-# --- Inner class for the marker drawing ---
-
-class _MarkerNode extends Control:
-	const _MARKER_RADIUS := 6
-	const _HEADING_LINE_LEN := 18
-	var heading_angle: float = 0.0
-
-	func _draw() -> void:
-		draw_circle(Vector2.ZERO, _MARKER_RADIUS, Color.WHITE)
-		draw_circle(Vector2.ZERO, _MARKER_RADIUS - 2, Color(1.0, 0.3, 0.2))
-		var dir := Vector2(-sin(heading_angle), cos(heading_angle))
-		draw_line(Vector2.ZERO, dir * _HEADING_LINE_LEN, Color.WHITE, 2.0)
+			var wpos := Vector3(marker.x - world_off.x, 0.0, marker.y - world_off.z)
+			if cam.is_position_in_frustum(wpos):
+				var sp := cam.unproject_position(wpos)
+				draw_circle(sp, 7.0, Color(1.0, 0.85, 0.0))
+				draw_arc(sp, 13.0, 0.0, TAU, 20, Color(1.0, 1.0, 0.5), 2.0)
+				var arm := 6.0; var gap := 14.0
+				var c := Color(1.0, 0.85, 0.0)
+				draw_line(sp + Vector2(-gap - arm, 0), sp + Vector2(-gap, 0), c, 2.0)
+				draw_line(sp + Vector2( gap, 0),        sp + Vector2( gap + arm, 0), c, 2.0)
+				draw_line(sp + Vector2(0, -gap - arm),  sp + Vector2(0, -gap), c, 2.0)
+				draw_line(sp + Vector2(0,  gap),        sp + Vector2(0, gap + arm), c, 2.0)

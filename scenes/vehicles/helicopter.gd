@@ -138,7 +138,7 @@ func _process_inputs(delta: float) -> void:
 
 		var alt_error: float = _hover_target_alt - altitude_agl
 		_hover_pid_integral = clampf(_hover_pid_integral + alt_error * delta, -hover_pid_i_max, hover_pid_i_max)
-		var alt_derivative: float = -linear_velocity.y  # Negative because falling = positive error rate
+		var alt_derivative: float = -linear_velocity.dot(planet_up)  # positive when falling
 		var pid_output: float = hover_pid_p * alt_error + hover_pid_i * _hover_pid_integral + hover_pid_d * alt_derivative
 		collective = clampf(hover_base_collective + pid_output, 0.0, 1.0)
 
@@ -184,7 +184,7 @@ func _apply_flight_physics(delta: float) -> void:
 	var lift_with_ground_effect := base_lift * (1.0 + ground_effect)
 
 	# Translational lift (ETL - Effective Translational Lift)
-	var horizontal_speed: float = Vector2(linear_velocity.x, linear_velocity.z).length()
+	var horizontal_speed: float = (linear_velocity - linear_velocity.dot(planet_up) * planet_up).length()
 	var translational_factor: float = clamp(horizontal_speed / translational_lift_speed, 0.0, 1.0)
 	var total_lift: float = lift_with_ground_effect * (1.0 + translational_lift_bonus * translational_factor)
 
@@ -277,8 +277,8 @@ func _calculate_ground_effect() -> float:
 func _apply_stability(_delta: float, up: Vector3) -> void:
 	# Auto-leveling when cyclic is centered (Arma 3 style)
 	if absf(cyclic_pitch) < 0.1 and absf(cyclic_roll) < 0.1:
-		# Calculate how tilted we are
-		var world_up := Vector3.UP
+		# Calculate how tilted we are relative to local planet surface
+		var world_up := planet_up
 		var tilt_axis := up.cross(world_up)
 
 		if tilt_axis.length() > 0.01:

@@ -417,7 +417,7 @@ func _apply_flight_physics(delta: float) -> void:
 	var wing_factor: float = _get_wing_factor()  # still needed for aileron effectiveness
 
 	# Lift acts perpendicular to velocity, in the plane of the wing
-	var lift_direction: Vector3 = Vector3.UP
+	var lift_direction: Vector3 = planet_up
 	if airspeed > 1.0:
 		var velocity_dir: Vector3 = linear_velocity.normalized()
 		lift_direction = velocity_dir.cross(right).normalized()
@@ -591,9 +591,9 @@ func _apply_stability(_delta: float, up: Vector3, forward: Vector3, right: Vecto
 		apply_torque(-up * sideslip * yaw_stability * mass * vtail_factor)
 
 	# Pitch stability — only when near-level and controls centred
-	var forward_horizontal: Vector3 = Vector3(forward.x, 0, forward.z).normalized()
+	var forward_horizontal: Vector3 = (forward - forward.dot(planet_up) * planet_up).normalized()
 	var pitch_angle: float = forward.angle_to(forward_horizontal) if forward_horizontal.length() > 0.01 else 0.0
-	if forward.y < 0:
+	if forward.dot(planet_up) < 0:
 		pitch_angle = -pitch_angle
 	if absf(elevator_input) < 0.1 and absf(angular_velocity.dot(right)) < 0.3:
 		var pitch_factor := clampf(1.0 - absf(pitch_angle) / 1.0, 0.0, 1.0)
@@ -604,7 +604,7 @@ func _apply_stability(_delta: float, up: Vector3, forward: Vector3, right: Vecto
 	var roll_rate: float = absf(angular_velocity.dot(forward))
 	var roll_damp: float = clampf(1.0 - roll_rate / 0.8, 0.0, 1.0)
 	if absf(aileron_input) < 0.1:
-		var roll_angle: float = up.signed_angle_to(Vector3.UP, forward)
+		var roll_angle: float = up.signed_angle_to(planet_up, forward)
 		apply_torque(forward * (-roll_angle * roll_stability * mass * 0.05 * wing_factor * roll_damp))
 
 func _calculate_ground_effect() -> float:
@@ -635,7 +635,7 @@ func _apply_ground_forces(_delta: float) -> void:
 	if altitude_agl > 2.0:
 		return
 	# If climbing away from ground, wheels have left the surface
-	if linear_velocity.y > 1.5:
+	if linear_velocity.dot(planet_up) > 1.5:
 		return
 
 	var fwd := -global_transform.basis.z
@@ -645,7 +645,7 @@ func _apply_ground_forces(_delta: float) -> void:
 	# Wheel lateral friction - each wheel resists motion perpendicular to its rolling direction
 	# Front wheel direction rotates with nosewheel steering, rear wheels stay fixed
 	var steer_rad: float = rudder_input * deg_to_rad(nosewheel_steer_angle) if is_occupied else 0.0
-	var front_lateral: Vector3 = right.rotated(Vector3.UP, steer_rad)
+	var front_lateral: Vector3 = right.rotated(planet_up, steer_rad)
 	var wheel_cols: Array = [front_wheel_col, left_wheel_col, right_wheel_col]
 	var wheel_laterals: Array = [front_lateral, right, right]
 
